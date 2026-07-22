@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: dorahub
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/dorahub}
+    username: ${DATABASE_USER:dorahub}
+    password: ${DATABASE_PASSWORD:change-me}
+  flyway:
+    locations: classpath:db/migration
+    out-of-order: false
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+server:
+  shutdown: graceful

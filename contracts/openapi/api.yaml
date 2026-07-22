@@ -1,0 +1,38 @@
+openapi: 3.1.0
+info:
+  title: Dorahub Internal API
+  version: 0.1.0
+paths:
+  /api/v1/system/time:
+    get:
+      operationId: getServerTime
+      summary: Return authoritative server time
+      responses:
+        "200":
+          description: Current UTC server time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerTimeResponse"
+components:
+  schemas:
+    ServerTimeResponse:
+      type: object
+      additionalProperties: false
+      required: [serverTime]
+      properties:
+        serverTime:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string, format: uri-reference }
+        code: { type: string }
+        correlationId: { type: string }
+

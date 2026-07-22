@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dorahub}
+      POSTGRES_USER: ${POSTGRES_USER:-dorahub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dorahub} -d ${POSTGRES_DB:-dorahub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dorahub}
+      DATABASE_USER: ${POSTGRES_USER:-dorahub}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    stop_grace_period: 25s
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    profiles: ["ui"]
+    build: frontend
+    ports:
+      - "5173:80"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres-data:
+

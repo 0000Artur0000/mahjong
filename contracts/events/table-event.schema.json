@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dorahub.ru/schemas/table-event.schema.json",
+  "title": "TableEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["aggregateId", "sequence", "type", "source", "payload", "timestamp"],
+  "properties": {
+    "aggregateId": { "type": "string", "format": "uuid" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "actorId": { "type": ["string", "null"], "format": "uuid" },
+    "source": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "type": "integer", "minimum": 1, "default": 1 },
+    "payload": { "type": "object" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}
+

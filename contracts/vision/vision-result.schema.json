@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dorahub.ru/schemas/vision-result.schema.json",
+  "title": "VisionResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "modelVersion", "status", "detections", "warnings"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "modelVersion": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["accepted", "rejected"] },
+    "detections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tile", "confidence", "box"],
+        "properties": {
+          "tile": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "box": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "prefixItems": [
+              { "type": "number" },
+              { "type": "number" },
+              { "type": "number" },
+              { "type": "number" }
+            ],
+            "items": false
+          }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "rejectionReason": { "type": ["string", "null"] }
+  }
+}

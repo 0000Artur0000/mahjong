@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dorahub.ru/schemas/ruleset.schema.json",
+  "title": "RulesetSnapshot",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["key", "version", "atamahane", "tripleRonAbort", "nagashiMangan", "chomboPenalty"],
+  "properties": {
+    "key": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "atamahane": { "type": "boolean" },
+    "tripleRonAbort": { "type": "boolean" },
+    "nagashiMangan": { "type": "boolean" },
+    "chomboPenalty": { "type": "integer" }
+  }
+}
+
