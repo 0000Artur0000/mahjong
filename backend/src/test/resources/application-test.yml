@@ -1,0 +1,10 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0

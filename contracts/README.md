@@ -9,3 +9,5 @@
 
 Изменение общего формата сначала вливается отдельным `contract/...` PR. Generated clients не редактируются вручную.
 
+`./scripts/openapi.sh validate` проверяет HTTP-контракт. Команда `generate-frontend`
+генерирует TypeScript Fetch client, а `breaking <baseline.yaml>` проверяет совместимость перед merge.

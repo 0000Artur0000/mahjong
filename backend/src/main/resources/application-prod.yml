@@ -1,0 +1,77 @@
+dorahub:
+  auth:
+    totp:
+      enabled: true
+      encryption-key: ${TOTP_ENCRYPTION_KEY}
+    external:
+      enabled: true
+      public-base-url: ${PUBLIC_BASE_URL}
+      telegram:
+        client-id: ${TELEGRAM_OIDC_CLIENT_ID}
+        client-secret: ${TELEGRAM_OIDC_CLIENT_SECRET}
+        authorization-uri: https://oauth.telegram.org/auth
+        token-uri: https://oauth.telegram.org/token
+        jwk-set-uri: https://oauth.telegram.org/.well-known/jwks.json
+        issuer: https://oauth.telegram.org
+      vk:
+        client-id: ${VK_ID_CLIENT_ID}
+        authorization-uri: https://id.vk.ru/authorize
+        token-uri: https://id.vk.ru/oauth2/auth
+        user-info-uri: https://id.vk.ru/oauth2/user_info
+  integrations:
+    oidc:
+      telegram-client-id: ${TELEGRAM_OIDC_CLIENT_ID}
+      telegram-client-secret: ${TELEGRAM_OIDC_CLIENT_SECRET}
+      vk-client-id: ${VK_ID_CLIENT_ID}
+      vk-client-secret: ${VK_ID_CLIENT_SECRET}
+    smtp:
+      host: ${SMTP_HOST}
+      port: ${SMTP_PORT}
+      username: ${SMTP_USERNAME}
+      password: ${SMTP_PASSWORD}
+      from: ${SMTP_FROM}
+    s3:
+      endpoint: ${S3_ENDPOINT}
+      region: ${S3_REGION}
+      bucket: ${S3_BUCKET}
+      access-key: ${S3_ACCESS_KEY}
+      secret-key: ${S3_SECRET_KEY}
+    vision:
+      base-url: ${VISION_BASE_URL}
+      api-key: ${VISION_API_KEY}
+
+spring:
+  mail:
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
+
+logging:
+  structured:
+    format:
+      console: logstash
+
+management:
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        enabled: ${OTEL_EXPORT_ENABLED:false}
+        url: ${OTEL_METRICS_URL:http://localhost:4318/v1/metrics}
+  tracing:
+    export:
+      enabled: ${OTEL_EXPORT_ENABLED:false}

@@ -2,8 +2,6 @@ plugins {
     base
 }
 
-tasks.register("checkAll") {
-    group = "verification"
+tasks.named("check") {
     dependsOn(":backend:check")
 }
-

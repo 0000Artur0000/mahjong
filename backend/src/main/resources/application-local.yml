@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/dorahub}
+    username: ${DATABASE_USER:dorahub}
+    password: ${DATABASE_PASSWORD:change-me}

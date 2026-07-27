@@ -1,21 +1,715 @@
 openapi: 3.1.0
 info:
   title: Dorahub Internal API
-  version: 0.1.0
+  version: 0.6.0
+  description: |
+    JSON uses lowerCamelCase property names and RFC 3339 UTC timestamps.
+    Collection endpoints use zero-based pages and the shared page, size, sort and filter parameters.
+servers:
+  - url: /
 paths:
+  /api/v1/auth/csrf:
+    get:
+      operationId: getCsrfToken
+      summary: Start or resume a browser session and return its CSRF token
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: CSRF header name and token
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfTokenResponse"
+  /api/v1/auth/email/code:
+    post:
+      operationId: requestEmailLoginCode
+      summary: Request a one-time login code
+      description: Always returns the same response for valid email input, including throttled requests.
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailLoginCodeRequest"
+      responses:
+        "202":
+          description: Request accepted without disclosing account existence
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/email/verify:
+    post:
+      operationId: verifyEmailLoginCode
+      summary: Verify a one-time code and create an authenticated session
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailLoginCodeVerifyRequest"
+      responses:
+        "200":
+          description: Authenticated account
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticatedAccountResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Invalidate the current session
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "204":
+          description: Session invalidated
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/identities:
+    get:
+      operationId: listAccountIdentities
+      summary: List login identities owned by the authenticated account
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Primary account and its login identities
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountIdentitiesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/identities/email:
+    post:
+      operationId: linkEmailIdentity
+      summary: Link a verified email identity to the current primary account
+      description: Requires a recent successful login. Accounts are never merged by this operation.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailLoginCodeVerifyRequest"
+      responses:
+        "200":
+          description: Identity linked, or already owned by the same primary account
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityLinkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/auth/identities/{identityId}:
+    delete:
+      operationId: unlinkAccountIdentity
+      summary: Unlink a login identity without removing the last working method
+      description: Requires a recent successful login.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/IdentityId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "204":
+          description: Identity unlinked
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/totp:
+    get:
+      operationId: getTotpStatus
+      summary: Return TOTP state without returning its secret or recovery codes
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: TOTP state and number of unused recovery codes
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      operationId: disableTotp
+      summary: Disable TOTP and invalidate all recovery codes
+      description: Requires a recent primary authentication and successful second factor.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "204":
+          description: TOTP disabled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/auth/totp/enrollment:
+    post:
+      operationId: startTotpEnrollment
+      summary: Create a pending encrypted TOTP secret
+      description: Requires a recent primary authentication. A repeated pending enrollment replaces the old secret.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Provisioning URI shown only for this enrollment response
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrollment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/totp/enrollment/confirm:
+    post:
+      operationId: confirmTotpEnrollment
+      summary: Confirm the first TOTP and issue one-time recovery codes
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: TOTP enabled; recovery codes are returned once and never retrievable again
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /api/v1/auth/totp/verify:
+    post:
+      operationId: verifySecondFactor
+      summary: Establish recent step-up using TOTP or one recovery code
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecurityCodeRequest"
+      responses:
+        "200":
+          description: Recent second-factor marker established in the current server session
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondFactorVerification"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /api/v1/auth/{provider}/start:
+    get:
+      operationId: startExternalLogin
+      summary: Start Telegram or VK authorization with server-generated state and PKCE
+      parameters:
+        - $ref: "#/components/parameters/AuthProvider"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "302":
+          description: Redirect to the selected provider
+          headers:
+            Location:
+              description: Provider authorization URL
+              schema:
+                type: string
+                format: uri
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+  /api/v1/auth/{provider}/link/start:
+    get:
+      operationId: startExternalIdentityLink
+      summary: Start linking Telegram or VK to the current primary account
+      description: Requires a recent successful login. Accounts are never merged by this operation.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/AuthProvider"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "302":
+          description: Redirect to the selected provider with account-bound state and PKCE
+          headers:
+            Location:
+              description: Provider authorization URL
+              schema:
+                type: string
+                format: uri
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/{provider}/callback:
+    get:
+      operationId: completeExternalLogin
+      summary: Validate a provider login or identity-link callback
+      description: |
+        The callback must carry the same browser session established by the start endpoint.
+        A link callback keeps the current primary account and rejects an identity owned by another account.
+      parameters:
+        - $ref: "#/components/parameters/AuthProvider"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 256
+        - name: code
+          in: query
+          description: Required on a successful provider callback.
+          schema:
+            type: string
+            maxLength: 2048
+        - name: device_id
+          in: query
+          description: Required for VK ID callbacks.
+          schema:
+            type: string
+            maxLength: 256
+        - name: error
+          in: query
+          description: Provider cancellation or authorization error.
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        "200":
+          description: Authenticated account; callback state is consumed
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticatedAccountResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/system/time:
     get:
       operationId: getServerTime
       summary: Return authoritative server time
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
       responses:
         "200":
           description: Current UTC server time
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ServerTimeResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: DORAHUB_SESSION
+  headers:
+    CorrelationId:
+      description: Request correlation identifier. The server returns a safe supplied value or generates one.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._-]{1,64}$"
+  parameters:
+    AuthProvider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [telegram, vk]
+    IdentityId:
+      name: identityId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequestCorrelationId:
+      name: X-Correlation-Id
+      in: header
+      description: Optional caller-generated request correlation identifier.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._-]{1,64}$"
+    ClientSource:
+      name: X-Client-Source
+      in: header
+      description: Low-cardinality client channel, without device or user identifiers.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._-]{1,32}$"
+    Page:
+      name: page
+      in: query
+      description: Zero-based page number.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 10000
+        default: 0
+    Size:
+      name: size
+      in: query
+      description: Number of items per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Sort:
+      name: sort
+      in: query
+      description: Repeatable `field,direction` value. Direction is `asc` or `desc`.
+      style: form
+      explode: true
+      schema:
+        type: array
+        maxItems: 5
+        items:
+          type: string
+          pattern: "^[A-Za-z][A-Za-z0-9.]*,(asc|desc)$"
+    Filter:
+      name: filter
+      in: query
+      description: Endpoint-supported field/value filters encoded as a deep object.
+      style: deepObject
+      explode: true
+      schema:
+        type: object
+        maxProperties: 20
+        additionalProperties:
+          type: string
+          maxLength: 200
+  responses:
+    BadRequest:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Malformed request (`request.invalid`).
+    Unauthorized:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Authentication is required (`authentication.required`).
+    Forbidden:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Access is denied (`access.denied`).
+    NotFound:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Resource was not found (`resource.not_found`).
+    Conflict:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Request conflicts with current state (`state.conflict`).
+    PayloadTooLarge:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Request body is too large (`request.too_large`).
+    UnprocessableEntity:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Request is syntactically valid but cannot be processed (`request.unprocessable`).
+    TooManyRequests:
+      $ref: "#/components/responses/ProblemResponse"
+      description: Rate limit was exceeded (`rate_limit.exceeded`).
+    ServiceUnavailable:
+      $ref: "#/components/responses/ProblemResponse"
+      description: A required service is unavailable (`service.unavailable`).
+    ProblemResponse:
+      description: Request failed.
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
   schemas:
+    CsrfTokenResponse:
+      type: object
+      additionalProperties: false
+      required: [headerName, token]
+      properties:
+        headerName:
+          type: string
+          const: X-CSRF-TOKEN
+        token:
+          type: string
+          minLength: 1
+    EmailLoginCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+    EmailLoginCodeVerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [email, code]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+    AuthenticatedAccountResponse:
+      type: object
+      additionalProperties: false
+      required: [accountId]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+    AccountIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, provider, subject, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          enum: [email, telegram, vk]
+        subject:
+          type: string
+          maxLength: 320
+        createdAt:
+          type: string
+          format: date-time
+    AccountIdentitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [primaryAccountId, identities]
+      properties:
+        primaryAccountId:
+          type: string
+          format: uuid
+        identities:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/AccountIdentity"
+    IdentityLinkResponse:
+      type: object
+      additionalProperties: false
+      required: [primaryAccountId, accountMerged, created, identity]
+      properties:
+        primaryAccountId:
+          type: string
+          format: uuid
+        accountMerged:
+          type: boolean
+          const: false
+        created:
+          type: boolean
+        identity:
+          $ref: "#/components/schemas/AccountIdentity"
+    TotpStatus:
+      type: object
+      additionalProperties: false
+      required: [state, recoveryCodesRemaining]
+      properties:
+        state:
+          type: string
+          enum: [disabled, pending, enabled]
+        recoveryCodesRemaining:
+          type: integer
+          minimum: 0
+          maximum: 10
+    TotpEnrollment:
+      type: object
+      additionalProperties: false
+      required: [provisioningUri]
+      properties:
+        provisioningUri:
+          type: string
+          pattern: "^otpauth://totp/"
+          maxLength: 512
+    TotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+    SecurityCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: "^([0-9]{6}|[A-Za-z0-9_-]{22})$"
+    RecoveryCodesResponse:
+      type: object
+      additionalProperties: false
+      required: [recoveryCodes]
+      properties:
+        recoveryCodes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{22}$"
+    SecondFactorVerification:
+      type: object
+      additionalProperties: false
+      required: [factor]
+      properties:
+        factor:
+          type: string
+          enum: [totp, recovery]
     ServerTimeResponse:
       type: object
       additionalProperties: false
@@ -24,15 +718,38 @@ components:
         serverTime:
           type: string
           format: date-time
+    PageMetadata:
+      type: object
+      additionalProperties: false
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        totalElements: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, code, message]
+      properties:
+        field: { type: string }
+        code: { type: string }
+        message: { type: string }
     Problem:
       type: object
-      required: [type, title, status, code]
+      additionalProperties: true
+      required: [type, title, status, code, correlationId]
       properties:
         type: { type: string, format: uri-reference }
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string }
         instance: { type: string, format: uri-reference }
-        code: { type: string }
-        correlationId: { type: string }
-
+        code: { type: string, pattern: "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$" }
+        correlationId:
+          type: string
+          pattern: "^[A-Za-z0-9._-]{1,64}$"
+        fieldErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
