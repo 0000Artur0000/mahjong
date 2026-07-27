@@ -7,5 +7,6 @@ commit `4955fb61e3d9dab7e6a3640ce2a63759ca0da27f` (`mahjong-layout`, author
 
 В Dorahub перенесены идеи `TileBox → scale-aware DBSCAN → hand/discard/wall`
 и параметры калибровки. Реализация адаптирована на Python stdlib и добавляет
-валидацию normalized boxes и лимит detections. Upstream dataset, images,
-labels, OCR, classifier, CLI и visualization не копируются.
+валидацию normalized boxes и лимит detections. OCR, classifier, CLI и
+visualization не копируются. CC BY 4.0 dataset импортирован отдельно в
+`vision/datasets/haitaks-mahjong-layout-v2` как single-class detector baseline.
