@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Dorahub Internal API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     JSON uses lowerCamelCase property names and RFC 3339 UTC timestamps.
     Collection endpoints use zero-based pages and the shared page, size, sort and filter parameters.
@@ -425,6 +425,116 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/profiles/{accountId}:
+    get:
+      operationId: getPublicProfile
+      summary: Return the public fields of an active account
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Public profile without authentication or moderation data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicProfile"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/account/profile:
+    get:
+      operationId: getOwnProfile
+      summary: Return the authenticated account profile and privacy settings
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Own profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updateOwnProfile
+      summary: Replace editable profile fields and privacy settings
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/account/deactivation:
+    post:
+      operationId: deactivateOwnAccount
+      summary: Hide an account and invalidate its sessions
+      description: Requires recent authentication and a second factor when enabled.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "204":
+          description: Account deactivated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/account:
+    delete:
+      operationId: deleteOwnAccount
+      summary: Deactivate an account and schedule personal-data cleanup
+      description: Requires recent authentication and a second factor when enabled.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "202":
+          description: Cleanup was scheduled and all sessions were invalidated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDeletion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/system/time:
     get:
       operationId: getServerTime
@@ -459,6 +569,13 @@ components:
         type: string
         pattern: "^[A-Za-z0-9._-]{1,64}$"
   parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     AuthProvider:
       name: provider
       in: path
@@ -607,6 +724,82 @@ components:
         accountId:
           type: string
           format: uuid
+    PublicProfile:
+      type: object
+      additionalProperties: false
+      required: [accountId, nickname]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 32
+        city:
+          type: [string, "null"]
+          maxLength: 128
+    ProfilePrivacy:
+      type: object
+      additionalProperties: false
+      required: [showCity, showClubs]
+      properties:
+        showCity:
+          type: boolean
+        showClubs:
+          type: boolean
+    PrivateProfile:
+      type: object
+      additionalProperties: false
+      required: [accountId, nickname, status, privacy]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 32
+        city:
+          type: [string, "null"]
+          maxLength: 128
+        avatarMediaId:
+          type: [string, "null"]
+          format: uuid
+        status:
+          type: string
+          enum: [active, deactivated]
+        privacy:
+          $ref: "#/components/schemas/ProfilePrivacy"
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [nickname, privacy]
+      properties:
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[\\p{L}\\p{N}_-]+$"
+        city:
+          type: [string, "null"]
+          maxLength: 128
+        avatarMediaId:
+          type: [string, "null"]
+          format: uuid
+        privacy:
+          $ref: "#/components/schemas/ProfilePrivacy"
+    AccountDeletion:
+      type: object
+      additionalProperties: false
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
     AccountIdentity:
       type: object
       additionalProperties: false

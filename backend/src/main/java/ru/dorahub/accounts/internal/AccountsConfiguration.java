@@ -7,12 +7,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration(proxyBeanMethods = false)
+@EnableScheduling
 class AccountsConfiguration {
 
   @Bean
@@ -56,5 +59,12 @@ class AccountsConfiguration {
   @Profile("!test")
   StepUpAuthentication stepUpAuthentication(JdbcTemplate jdbc, LoginSession loginSession) {
     return new StepUpAuthentication(jdbc, loginSession);
+  }
+
+  @Bean
+  @Profile("!test")
+  AccountProfiles accountProfiles(
+      JdbcTemplate jdbc, TransactionTemplate transactions, Clock clock) {
+    return new AccountProfiles(jdbc, transactions, clock);
   }
 }
