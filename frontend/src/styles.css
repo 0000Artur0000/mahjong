@@ -1,45 +1,92 @@
-:root {
-  color: #f5efe3;
-  background: #090d18;
-  font-family: system-ui, sans-serif;
-  font-synthesis: none;
+/* Base layer: reset + element defaults. Every value comes from tokens.css. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 * {
-  box-sizing: border-box;
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  /* Scores and timers must never reflow when digits change. */
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--duration-base) var(--ease-out),
+    color var(--duration-base) var(--ease-out);
 }
 
-main {
-  width: min(44rem, calc(100% - 2rem));
-  margin: 0 auto;
-  padding: 20vh 0 4rem;
+h1,
+h2,
+h3 {
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-heavy);
 }
 
-h1 {
-  margin: 0.5rem 0 1rem;
-  color: #d6b36a;
-  font-size: clamp(2.5rem, 10vw, 5rem);
-  line-height: 0.95;
+a {
+  color: var(--color-accent-ink);
 }
 
-p {
-  max-width: 40rem;
-  color: #d9d7d2;
-  font-size: 1.1rem;
-  line-height: 1.6;
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
-.eyebrow {
-  margin: 0;
-  color: #41b39a;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+::selection {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings:
+    "tnum" 1,
+    "lnum" 1;
+}
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* When the OS strips our palette, keep every boundary and focus ring visible. */
+@media (forced-colors: active) {
+  .tile,
+  .swatch,
+  .plate,
+  .card {
+    border: 1px solid CanvasText;
+  }
+  :where(a, button, [tabindex]):focus-visible {
+    outline-color: Highlight;
+  }
+}

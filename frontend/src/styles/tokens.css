@@ -1,0 +1,244 @@
+/*
+ * Dorahub design tokens — the single source of truth for "mahjong noir".
+ * Two layers: primitive ramps (theme-independent) → semantic tokens (flip per theme).
+ * Components consume semantic tokens only, never raw ramp values or hex.
+ * Contrast of every semantic text/surface pair is enforced by tests/contrast.test.ts.
+ */
+
+:root {
+  /* ---- Primitive ramps ------------------------------------------------ */
+  /* Ink: cool navy neutrals (dark theme surfaces + light theme text). */
+  --ink-950: #070a12;
+  --ink-900: #090d18;
+  --ink-850: #0f1626;
+  --ink-800: #16203a;
+  --ink-700: #232e4a;
+  --ink-600: #364163;
+  --ink-550: #565d6e;
+  --ink-500: #77809a;
+  --ink-400: #8b93a7;
+  --ink-300: #a7b0c4;
+  --ink-200: #c6ccda;
+  --ink-100: #e4e8f0;
+
+  /* Bone: warm neutrals for the light "bamboo table" theme. */
+  --bone-050: #ffffff;
+  --bone-100: #fbf8f1;
+  --bone-200: #f4efe4;
+  --bone-300: #ded4c2;
+  --bone-400: #c3b598;
+  --bone-500: #8f7f5f;
+  --cream: #f5efe3;
+
+  /* Gold: the dealer / accent hue. */
+  --gold-300: #e6cf9a;
+  --gold-400: #d6b36a;
+  --gold-500: #c99a3a;
+  --gold-600: #a97f2e;
+  --gold-700: #7c5a11;
+
+  /* Jade: positive / confirmed. */
+  --jade-300: #7fd6c2;
+  --jade-400: #4fbfa6;
+  --jade-500: #2fa389;
+  --jade-600: #1f7a68;
+  --jade-700: #12564a;
+
+  /* Coral: danger / chombo. */
+  --coral-300: #f4a08e;
+  --coral-400: #f0725a;
+  --coral-500: #d94e34;
+  --coral-600: #b23a26;
+  --coral-700: #7f2818;
+
+  /* Amber: warning. */
+  --amber-400: #e6b450;
+  --amber-600: #9a6f16;
+  --amber-700: #7a5810;
+
+  /* ---- Spacing (4px grid) --------------------------------------------- */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+
+  /* ---- Radii ---------------------------------------------------------- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ---- Typography ----------------------------------------------------- */
+  --font-sans: "Onest Variable", system-ui, "Segoe UI", Roboto, sans-serif;
+  /* CJK for winds/dragons/yaku; system fallback now, bundled subset in FE-32. */
+  --font-cjk: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", var(--font-sans);
+  --font-numeric: var(--font-sans);
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: clamp(1.75rem, 4vw, 2.5rem);
+  --text-4xl: clamp(2.25rem, 6vw, 3.5rem);
+  --text-5xl: clamp(2.75rem, 10vw, 5rem);
+
+  --leading-tight: 1.05;
+  --leading-snug: 1.25;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.08em;
+  --tracking-wider: 0.16em;
+
+  /* ---- Z-index scale -------------------------------------------------- */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-max: 999;
+
+  /* ---- Motion --------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 240ms;
+}
+
+/* ---- Semantic tokens: DARK (mahjong noir, default) -------------------- */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: var(--ink-900);
+  --color-surface: var(--ink-850);
+  --color-surface-raised: var(--ink-800);
+  --color-border: var(--ink-700);
+  --color-border-strong: var(--ink-400);
+
+  --color-fg: var(--cream);
+  --color-fg-muted: var(--ink-300);
+  --color-fg-subtle: var(--ink-400);
+
+  --color-accent: var(--gold-400);
+  --color-on-accent: var(--ink-950);
+  --color-accent-ink: var(--gold-400);
+
+  --color-positive: var(--jade-400);
+  --color-on-positive: var(--ink-950);
+  --color-positive-ink: var(--jade-400);
+
+  --color-danger: var(--coral-400);
+  --color-on-danger: var(--ink-950);
+  --color-danger-ink: var(--coral-400);
+
+  --color-warning: var(--amber-400);
+  --color-on-warning: var(--ink-950);
+  --color-warning-ink: var(--amber-400);
+
+  --color-focus: var(--jade-300);
+  --color-dealer: var(--gold-400);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 18px 50px rgba(0, 0, 0, 0.6);
+  --tile-face: linear-gradient(180deg, var(--ink-800), var(--ink-850));
+}
+
+/* ---- Semantic tokens: LIGHT (bamboo table) --------------------------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: var(--bone-200);
+  --color-surface: var(--bone-100);
+  --color-surface-raised: var(--bone-050);
+  --color-border: var(--bone-300);
+  --color-border-strong: var(--bone-500);
+
+  --color-fg: var(--ink-900);
+  --color-fg-muted: var(--ink-550);
+  --color-fg-subtle: var(--ink-500);
+
+  --color-accent: var(--gold-600);
+  --color-on-accent: var(--ink-950);
+  --color-accent-ink: var(--gold-700);
+
+  --color-positive: var(--jade-600);
+  --color-on-positive: var(--bone-050);
+  --color-positive-ink: var(--jade-700);
+
+  --color-danger: var(--coral-600);
+  --color-on-danger: var(--bone-050);
+  --color-danger-ink: var(--coral-700);
+
+  --color-warning: var(--amber-600);
+  --color-on-warning: var(--bone-050);
+  --color-warning-ink: var(--amber-700);
+
+  --color-focus: var(--jade-600);
+  --color-dealer: var(--gold-600);
+
+  --shadow-1: 0 1px 2px rgba(38, 30, 16, 0.1);
+  --shadow-2: 0 8px 24px rgba(38, 30, 16, 0.12);
+  --shadow-3: 0 20px 50px rgba(38, 30, 16, 0.16);
+  --tile-face: linear-gradient(180deg, var(--bone-050), var(--bone-100));
+}
+
+/* Follow the OS when the user has not chosen a theme explicitly. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+
+    --color-bg: var(--bone-200);
+    --color-surface: var(--bone-100);
+    --color-surface-raised: var(--bone-050);
+    --color-border: var(--bone-300);
+    --color-border-strong: var(--bone-500);
+
+    --color-fg: var(--ink-900);
+    --color-fg-muted: var(--ink-550);
+    --color-fg-subtle: var(--ink-500);
+
+    --color-accent: var(--gold-500);
+    --color-on-accent: var(--ink-950);
+    --color-accent-ink: var(--gold-700);
+
+    --color-positive: var(--jade-600);
+    --color-on-positive: var(--bone-050);
+    --color-positive-ink: var(--jade-700);
+
+    --color-danger: var(--coral-600);
+    --color-on-danger: var(--bone-050);
+    --color-danger-ink: var(--coral-700);
+
+    --color-warning: var(--amber-600);
+    --color-on-warning: var(--bone-050);
+    --color-warning-ink: var(--amber-700);
+
+    --color-focus: var(--jade-600);
+    --color-dealer: var(--gold-600);
+
+    --shadow-1: 0 1px 2px rgba(38, 30, 16, 0.1);
+    --shadow-2: 0 8px 24px rgba(38, 30, 16, 0.12);
+    --shadow-3: 0 20px 50px rgba(38, 30, 16, 0.16);
+    --tile-face: linear-gradient(180deg, var(--bone-050), var(--bone-100));
+  }
+}

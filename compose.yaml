@@ -35,7 +35,9 @@ services:
 
   frontend:
     profiles: ["ui"]
-    build: frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     ports:
       - "5173:80"
     security_opt:
@@ -43,4 +45,3 @@ services:
 
 volumes:
   postgres-data:
-
