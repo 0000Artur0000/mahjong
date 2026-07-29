@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { config } from "@/config";
 import { ApiDemo } from "@/showcase/ApiDemo";
 import { Primitives } from "@/showcase/Primitives";
+import { MotionDemo } from "@/showcase/MotionDemo";
+import { Reveal } from "@/motion/Reveal";
 import { Tile, TILE_IDS } from "@/ui";
 import "../styles/showcase.css";
 
@@ -307,6 +309,31 @@ export function Component() {
               <code>{token.replace("--", "")}</code>
             </div>
           ))}
+        </div>
+      </Plate>
+
+      <Plate label="Motion" title="Три слоя анимации">
+        <div className="stack stack--wide">
+          <div className="stack">
+            <p className="demo-label">Слой 1 · CSS reveal + stagger</p>
+            <div className="cluster">
+              {(["1m", "2m", "3m"] as const).map((id, i) => (
+                <Reveal key={id} stagger={i}>
+                  <Tile tile={id} width={48} />
+                </Reveal>
+              ))}
+            </div>
+          </div>
+          <div className="stack">
+            <p className="demo-label">
+              Слой 2 · View Transitions: переключатель темы в шапке делает
+              wipe из точки клика
+            </p>
+          </div>
+          <div className="stack">
+            <p className="demo-label">Слой 3 · motion/react, lazy-чанк</p>
+            <MotionDemo />
+          </div>
         </div>
       </Plate>
 

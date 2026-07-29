@@ -24,12 +24,14 @@
     "assets:icons": "node scripts/icons/build.mjs",
     "assets": "npm run assets:tiles && npm run assets:fonts && npm run assets:icons",
     "contract:check": "node scripts/contract-check.mjs",
+    "motion:check": "node scripts/motion-check.mjs",
     "analyze": "node scripts/bundle-report.mjs",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run contract:check && npm run build"
+    "check": "npm run lint && npm run typecheck && npm run test && npm run contract:check && npm run motion:check && npm run build"
   },
   "dependencies": {
     "@fontsource-variable/onest": "^5.3.0",
     "lucide-react": "^1.27.0",
+    "motion": "^12.43.0",
     "openapi-fetch": "^0.17.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",

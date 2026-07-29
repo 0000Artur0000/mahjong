@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Icon } from "@/ui";
+import { themeWipe } from "@/motion/viewTransitions";
 
 type Theme = "dark" | "light";
 
@@ -23,7 +24,13 @@ export function ThemeToggle() {
     <button
       type="button"
       className="theme-toggle"
-      onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+      onClick={(e) => {
+        // The whole page repaints as a circular wipe from the click point
+        // (View Transitions API; unsupported/reduced-motion = instant swap).
+        themeWipe(e.clientX, e.clientY, () =>
+          setTheme((t) => (t === "dark" ? "light" : "dark")),
+        );
+      }}
       aria-label={`Тема: ${theme === "dark" ? "тёмная" : "светлая"}. Переключить`}
     >
       <Icon icon={theme === "dark" ? Moon : Sun} size="sm" />

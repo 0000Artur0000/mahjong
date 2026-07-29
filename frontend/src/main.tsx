@@ -9,6 +9,7 @@ import "./styles/fonts.css";
 import "./styles.css";
 import "./styles/ui.css";
 import "./styles/effects.css";
+import "./styles/motion.css";
 import "./styles/layout.css";
 
 // In dev the app runs entirely on mocks, so it works without the backend.

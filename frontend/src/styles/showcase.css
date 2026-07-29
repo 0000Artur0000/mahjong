@@ -144,6 +144,22 @@
   line-height: var(--leading-snug);
 }
 
+/* ---- Motion demo (RD-03) ------------------------------------------------ */
+.motion-demo {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.motion-demo__table {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  min-height: 10rem;
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+}
+
 /* ---- Plate (section) ------------------------------------------------- */
 .plate {
   padding-top: var(--space-8);

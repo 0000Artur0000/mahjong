@@ -1,0 +1,100 @@
+/*
+ * Motion layer 1: hand-written CSS animation utilities (RD-03).
+ * Durations/easings come from tokens.css; everything is inert under
+ * prefers-reduced-motion (the global kill-switch in styles.css zeroes
+ * durations, and .reveal is forced visible below).
+ */
+
+/* ---- Scroll / mount reveal -------------------------------------------- */
+/* Starts hidden; Reveal (IntersectionObserver) adds .reveal--visible.
+   Without JS the class is never added, so content must not stay hidden:
+   the no-JS fallback is handled by Reveal rendering .reveal--visible
+   immediately when IO is unavailable or reduced-motion is set. */
+.reveal {
+  opacity: 0;
+  transform: translateY(var(--space-3));
+  transition:
+    opacity var(--duration-slow) var(--ease-luxe),
+    transform var(--duration-slow) var(--ease-luxe);
+  transition-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
+}
+.reveal--visible {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ---- Tile fall (404 / celebratory drops) -------------------------------- */
+@keyframes tile-fall {
+  0% {
+    opacity: 0;
+    transform: translateY(-120%) rotate(-14deg);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(4%) rotate(3deg);
+  }
+  80% {
+    transform: translateY(-2%) rotate(-1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0);
+  }
+}
+.tile-fall {
+  animation: tile-fall var(--duration-dramatic) var(--ease-out) both;
+  animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
+}
+
+/* ---- Idle float (hero parallax drift) ------------------------------------ */
+@keyframes float-drift {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--float-rot, 0deg));
+  }
+  50% {
+    transform: translateY(calc(-1 * var(--space-3)))
+      rotate(var(--float-rot, 0deg));
+  }
+}
+.float-drift {
+  animation: float-drift var(--float-period, 6s) var(--ease-luxe) infinite;
+  animation-delay: calc(var(--stagger-i, 0) * -1.3s);
+}
+
+/* ---- Gold pulse (confirm flash) ------------------------------------------ */
+@keyframes pulse-gold {
+  0% {
+    box-shadow: 0 0 0 0 var(--color-accent);
+    opacity: 1;
+  }
+  100% {
+    box-shadow: 0 0 0 var(--space-4) transparent;
+    opacity: 0;
+  }
+}
+.pulse-gold {
+  animation: pulse-gold var(--duration-slow) var(--ease-out) both;
+}
+
+/* ---- View Transitions (layer 2) ------------------------------------------- */
+/* The default root crossfade is toned to our duration; the theme wipe runs
+   as a WAAPI clip-path animation on ::view-transition-new (see theme.tsx). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--duration-base);
+  animation-timing-function: var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
