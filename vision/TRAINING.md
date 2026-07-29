@@ -36,3 +36,19 @@ it produced zero detections on the five private physical-table photos.
 The artifact is rejected for product use. The next quality step is real,
 session-separated, labeled hand crops; more synthetic epochs are not a
 substitute.
+
+## Audited mobile model smoke
+
+The released LiteRT model audited in `UPSTREAM.md` can check real photos
+without retraining:
+
+```bash
+python3 -m pip install -r vision/requirements-litert.txt
+PYTHONPATH=vision/src python3 vision/scripts/riichi_litert.py \
+  /path/to/mahjong_yolo.tflite /path/to/photos/* --nearest-hand
+```
+
+`--nearest-hand` uses the lower guided zone (`52%..88%` of image height), so
+small physical tiles reach the model at roughly twice the full-frame scale.
+The region is a capture-protocol calibration value, not automatic table-role
+inference.
