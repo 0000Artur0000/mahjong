@@ -52,3 +52,27 @@ PYTHONPATH=vision/src python3 vision/scripts/riichi_litert.py \
 small physical tiles reach the model at roughly twice the full-frame scale.
 The region is a capture-protocol calibration value, not automatic table-role
 inference.
+
+## Real-photo review gate
+
+Create a review-only YOLO draft from the audited Kaggle v1 source and LiteRT
+artifact:
+
+```bash
+PYTHONPATH=vision/src python3 vision/scripts/riichi_prelabel.py \
+  /path/to/riichi-mobile-kaggle-v1 /path/to/riichi-review-draft \
+  /path/to/mahjong_yolo.tflite
+```
+
+The draft symlinks images, writes canonical 37-class labels and keeps
+confidence/top-3 in `predictions.jsonl`. It intentionally has no `data.yaml`:
+
+1. Add every missing readable face and delete every false box.
+2. Correct classes; ambiguous/blurred scenes are `exclude`, never guessed.
+3. Set each `review.csv` row to `reviewed` or `exclude`.
+4. Give every reviewed row a capture session. Do not randomly split adjacent
+   photos or mix one physical session across train/validation.
+
+The local 2026-07-29 draft contains 257 images and 7,126 proposed boxes across
+37/37 classes. Kaggle files have no EXIF and 141 distinct resolutions, so
+capture sessions cannot be recovered automatically.
