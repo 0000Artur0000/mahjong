@@ -1,0 +1,153 @@
+/*
+ * Signature Noir Gold surface effects (RD-02). Consumes tokens.css only.
+ * Every decorative layer degrades gracefully: prefers-reduced-motion stops
+ * animation, forced-colors drops purely decorative paint, and content never
+ * depends on an effect alone.
+ */
+
+/* ---- Felt: the green club table --------------------------------------- */
+/* Deep felt + soft top light + woven noise + inset depth. */
+.fx-felt {
+  background-color: var(--color-felt);
+  background-image:
+    var(--felt-light),
+    var(--texture-noise);
+  color: var(--color-on-felt);
+  box-shadow: var(--shadow-inset-felt);
+}
+
+/* Raised area of the same table (tray, discard pool). */
+.fx-felt-raised {
+  background-color: var(--color-felt-raised);
+  background-image: var(--texture-noise);
+  color: var(--color-on-felt);
+  box-shadow: var(--shadow-inset-felt);
+}
+
+/* ---- Lamp: warm light over the table ---------------------------------- */
+/* Absolute overlay; the parent gets position:relative via .fx-stage. */
+.fx-lamp {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--lamp-glow);
+  animation: lamp-breathe 7s var(--ease-luxe) infinite;
+}
+@keyframes lamp-breathe {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---- Foil: gold leaf on headings -------------------------------------- */
+.fx-foil {
+  background: var(--foil-gradient);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: foil-sweep 7s var(--ease-luxe) infinite;
+}
+@keyframes foil-sweep {
+  0%,
+  100% {
+    background-position: 0% 0;
+  }
+  50% {
+    background-position: 100% 0;
+  }
+}
+@supports not (background-clip: text) {
+  .fx-foil {
+    background: none;
+    color: var(--color-accent-ink);
+  }
+}
+
+/* ---- Grain: cinematic film texture ------------------------------------- */
+/* Static noise by default; gentle jitter when motion is allowed. */
+.fx-grain {
+  position: relative;
+}
+.fx-grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--texture-noise);
+  animation: grain-jitter 1.4s steps(3) infinite;
+}
+@keyframes grain-jitter {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(-1.5%, 1%);
+  }
+  66% {
+    transform: translate(1%, -1.5%);
+  }
+}
+
+/* ---- Vignette: darkened table edges ------------------------------------ */
+.fx-vignette {
+  box-shadow: var(--shadow-vignette);
+}
+
+/* ---- Dealer ring: thin gold marker (not color alone) ------------------- */
+.fx-dealer-ring {
+  box-shadow: var(--shadow-dealer-ring);
+}
+
+/* ---- Lift: hover raise for cards and tiles ------------------------------ */
+.fx-lift {
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+.fx-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-3);
+}
+
+/* ---- Preference fallbacks ---------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .fx-lamp,
+  .fx-foil,
+  .fx-grain::after {
+    animation: none;
+  }
+  .fx-foil {
+    background-position: 50% 0;
+  }
+  .fx-lift,
+  .fx-lift:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .fx-felt,
+  .fx-felt-raised {
+    background-image: none;
+  }
+  .fx-lamp,
+  .fx-grain::after {
+    display: none;
+  }
+  .fx-foil {
+    background: none;
+    color: CanvasText;
+    animation: none;
+  }
+  .fx-dealer-ring {
+    outline: 2px solid Highlight;
+    box-shadow: none;
+  }
+}

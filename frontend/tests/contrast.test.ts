@@ -86,6 +86,10 @@ const PAIRS: Array<[string, string, number]> = [
   ["--color-border-strong", "--color-bg", UI],
   ["--color-focus", "--color-bg", UI],
   ["--color-accent", "--color-bg", UI],
+  // Noir Gold effects (RD-02): text on the felt table, felt as text accent.
+  ["--color-on-felt", "--color-felt", TEXT],
+  ["--color-on-felt", "--color-felt-raised", TEXT],
+  ["--color-felt-ink", "--color-bg", TEXT],
 ];
 
 describe("WCAG AA contrast", () => {

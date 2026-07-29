@@ -101,6 +101,49 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Effects (RD-02) --------------------------------------------------- */
+.fx-showcase {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.fx-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+.fx-demo-table {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-5);
+  padding: var(--space-7) var(--space-5) var(--space-5);
+  border-radius: var(--radius-xl);
+}
+
+.fx-demo-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+.fx-demo-dealer {
+  border-radius: var(--radius-md);
+}
+
+.fx-demo-caption {
+  font-size: var(--text-sm);
+  color: var(--color-on-felt);
+  opacity: 0.8;
+}
+
+.fx-demo-foil {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-snug);
+}
+
 /* ---- Plate (section) ------------------------------------------------- */
 .plate {
   padding-top: var(--space-8);

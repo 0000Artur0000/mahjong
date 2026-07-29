@@ -56,6 +56,22 @@
   --amber-600: #9a6f16;
   --amber-700: #7a5810;
 
+  /* Felt: deep table greens — the game surface stays green in both themes. */
+  --felt-200: #6fbf9e;
+  --felt-300: #58a88a;
+  --felt-500: #2e6b54;
+  --felt-700: #173c2f;
+  --felt-800: #0f2c22;
+  --felt-900: #0a1f18;
+
+  /* Glow: the warm lamp light over the table. */
+  --glow-300: #ffe3b3;
+  --glow-500: #f0be6a;
+  --glow-700: #c98f3a;
+
+  /* Film-grain / felt noise texture (SVG turbulence, theme-independent). */
+  --texture-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+
   /* ---- Spacing (4px grid) --------------------------------------------- */
   --space-0: 0;
   --space-1: 0.25rem;
@@ -122,8 +138,14 @@
 
   /* ---- Motion --------------------------------------------------------- */
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-luxe: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-instant: 80ms;
   --duration-fast: 120ms;
   --duration-base: 240ms;
+  --duration-slow: 400ms;
+  --duration-dramatic: 700ms;
+  --stagger-step: 40ms;
 }
 
 /* ---- Semantic tokens: DARK (mahjong noir, default) -------------------- */
@@ -164,6 +186,37 @@
   --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.5);
   --shadow-3: 0 18px 50px rgba(0, 0, 0, 0.6);
   --tile-face: linear-gradient(180deg, var(--ink-800), var(--ink-850));
+
+  /* Noir Gold effects (RD-02): felt table, warm lamp, gold foil, depth. */
+  --color-felt: var(--felt-800);
+  --color-felt-raised: var(--felt-700);
+  --color-on-felt: var(--cream);
+  --color-felt-ink: var(--felt-300);
+  --color-glow: var(--glow-500);
+
+  --shadow-4: 0 30px 80px rgba(0, 0, 0, 0.65);
+  --shadow-inset-felt: inset 0 2px 18px rgba(0, 0, 0, 0.4);
+  --shadow-vignette: inset 0 0 8rem rgba(0, 0, 0, 0.55);
+  --shadow-dealer-ring: 0 0 0 2px var(--color-dealer),
+    0 0 18px rgba(214, 179, 106, 0.45);
+  --foil-gradient: linear-gradient(
+    105deg,
+    var(--gold-700) 0%,
+    var(--gold-400) 35%,
+    var(--gold-300) 50%,
+    var(--gold-400) 65%,
+    var(--gold-700) 100%
+  );
+  --lamp-glow: radial-gradient(
+    ellipse 65% 45% at 50% 0%,
+    rgba(240, 190, 106, 0.14),
+    transparent 70%
+  );
+  --felt-light: radial-gradient(
+    ellipse 80% 60% at 50% 15%,
+    rgba(255, 255, 255, 0.06),
+    transparent 60%
+  );
 }
 
 /* ---- Semantic tokens: LIGHT (bamboo table) --------------------------- */
@@ -203,6 +256,37 @@
   --shadow-2: 0 8px 24px rgba(38, 30, 16, 0.12);
   --shadow-3: 0 20px 50px rgba(38, 30, 16, 0.16);
   --tile-face: linear-gradient(180deg, var(--bone-050), var(--bone-100));
+
+  /* Noir Gold effects (RD-02): felt table, warm lamp, gold foil, depth. */
+  --color-felt: var(--felt-800);
+  --color-felt-raised: var(--felt-700);
+  --color-on-felt: var(--cream);
+  --color-felt-ink: var(--felt-700);
+  --color-glow: var(--glow-700);
+
+  --shadow-4: 0 30px 80px rgba(38, 30, 16, 0.22);
+  --shadow-inset-felt: inset 0 2px 18px rgba(0, 0, 0, 0.4);
+  --shadow-vignette: inset 0 0 8rem rgba(38, 30, 16, 0.25);
+  --shadow-dealer-ring: 0 0 0 2px var(--color-dealer),
+    0 0 14px rgba(169, 127, 46, 0.4);
+  --foil-gradient: linear-gradient(
+    105deg,
+    var(--gold-700) 0%,
+    var(--gold-600) 35%,
+    var(--gold-500) 50%,
+    var(--gold-600) 65%,
+    var(--gold-700) 100%
+  );
+  --lamp-glow: radial-gradient(
+    ellipse 65% 45% at 50% 0%,
+    rgba(201, 143, 58, 0.14),
+    transparent 70%
+  );
+  --felt-light: radial-gradient(
+    ellipse 80% 60% at 50% 15%,
+    rgba(255, 255, 255, 0.07),
+    transparent 60%
+  );
 }
 
 /* Follow the OS when the user has not chosen a theme explicitly. */
@@ -243,5 +327,36 @@
     --shadow-2: 0 8px 24px rgba(38, 30, 16, 0.12);
     --shadow-3: 0 20px 50px rgba(38, 30, 16, 0.16);
     --tile-face: linear-gradient(180deg, var(--bone-050), var(--bone-100));
+
+    /* Noir Gold effects (RD-02) — mirror of the explicit light theme. */
+    --color-felt: var(--felt-800);
+    --color-felt-raised: var(--felt-700);
+    --color-on-felt: var(--cream);
+    --color-felt-ink: var(--felt-700);
+    --color-glow: var(--glow-700);
+
+    --shadow-4: 0 30px 80px rgba(38, 30, 16, 0.22);
+    --shadow-inset-felt: inset 0 2px 18px rgba(0, 0, 0, 0.4);
+    --shadow-vignette: inset 0 0 8rem rgba(38, 30, 16, 0.25);
+    --shadow-dealer-ring: 0 0 0 2px var(--color-dealer),
+      0 0 14px rgba(169, 127, 46, 0.4);
+    --foil-gradient: linear-gradient(
+      105deg,
+      var(--gold-700) 0%,
+      var(--gold-600) 35%,
+      var(--gold-500) 50%,
+      var(--gold-600) 65%,
+      var(--gold-700) 100%
+    );
+    --lamp-glow: radial-gradient(
+      ellipse 65% 45% at 50% 0%,
+      rgba(201, 143, 58, 0.14),
+      transparent 70%
+    );
+    --felt-light: radial-gradient(
+      ellipse 80% 60% at 50% 15%,
+      rgba(255, 255, 255, 0.07),
+      transparent 60%
+    );
   }
 }

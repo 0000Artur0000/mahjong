@@ -177,6 +177,32 @@ export function Component() {
         </div>
       </Plate>
 
+      <Plate label="Effects" title="Сукно, лампа, фольга">
+        <div className="fx-showcase">
+          <div className="fx-stage fx-felt fx-grain fx-vignette fx-demo-table">
+            <div className="fx-lamp" aria-hidden="true" />
+            <div className="fx-demo-tiles">
+              <Tile
+                tile="1z"
+                width={56}
+                className="fx-demo-dealer fx-dealer-ring"
+              />
+              <Tile tile="5m" width={56} className="fx-lift" />
+              <Tile tile="0p" width={56} className="fx-lift" />
+              <Tile tile="7s" width={56} className="fx-lift" />
+              <Tile tile="back" width={56} className="fx-lift" />
+            </div>
+            <p className="fx-demo-caption">
+              Сукно + лампа + зерно + виньетка; дилер отмечен тонким золотым
+              кольцом — не цветом в одиночку
+            </p>
+          </div>
+          <h3 className="fx-demo-foil fx-foil">
+            Золотая фольга на заголовке — Noto Serif
+          </h3>
+        </div>
+      </Plate>
+
       <Plate label="Color" title="Семантические токены">
         <div className="swatches">
           {SWATCHES.map((s) => (
