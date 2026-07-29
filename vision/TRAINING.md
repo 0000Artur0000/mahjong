@@ -83,3 +83,8 @@ The review draft is loaded into pinned CVAT `v2.51.0` at
 `http://localhost:8080/tasks/1`. The verified task has 257 frames, 9 jobs,
 37 labels and 7,126 rectangles. Local credentials, source images, annotations
 and CVAT volumes stay outside Git.
+
+The frozen five-photo acceptance set is separate at
+`http://localhost:8080/tasks/2`: 5 frames, 1 job, 37 labels and 51 initial
+rectangles. Correct these proposals before measuring exact-hand accuracy;
+never use this task for training, threshold tuning or model selection.
