@@ -80,6 +80,27 @@
   color: var(--color-fg-subtle);
 }
 
+/* ---- Tileset (RD-01 sprite) ------------------------------------------- */
+.tileset {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4rem, 1fr));
+  gap: var(--space-4) var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.tileset__item {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.tileset__label {
+  font-size: var(--text-xs);
+  color: var(--color-fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Plate (section) ------------------------------------------------- */
 .plate {
   padding-top: var(--space-8);

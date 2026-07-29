@@ -78,8 +78,11 @@
 
   /* ---- Typography ----------------------------------------------------- */
   --font-sans: "Onest Variable", system-ui, "Segoe UI", Roboto, sans-serif;
-  /* CJK for winds/dragons/yaku; system fallback now, bundled subset in FE-32. */
-  --font-cjk: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", var(--font-sans);
+  /* Editorial display serif (self-hosted Cyrillic subset, see fonts.css). */
+  --font-display: "Noto Serif Display", "Noto Serif", Georgia, serif;
+  /* CJK for winds/dragons/yaku; bundled honor-glyph subset first (RD-01). */
+  --font-cjk: "Noto Sans JP Honors", "Noto Sans JP", "Hiragino Sans",
+    "Yu Gothic", var(--font-sans);
   --font-numeric: var(--font-sans);
 
   --text-xs: 0.75rem;

@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { X } from "lucide-react";
 import { Button } from "./Button";
+import { Icon } from "./Icon";
 
 /**
  * Thin wrapper over the native <dialog>: focus trap, Escape and inert backdrop
@@ -46,7 +48,7 @@ export function Dialog({
             {title}
           </h2>
           <Button variant="ghost" icon aria-label="Закрыть" onClick={onClose}>
-            <span aria-hidden="true">✕</span>
+            <Icon icon={X} size="sm" />
           </Button>
         </div>
         <div className="dialog__body">{children}</div>

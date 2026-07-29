@@ -5,3 +5,7 @@ export { Popover, Menu } from "./Popover";
 export { ToastProvider } from "./Toast";
 export { useToast } from "./toast-context";
 export { Skeleton } from "./Skeleton";
+export { Icon } from "./Icon";
+export { Tile } from "./Tile";
+export { TILE_IDS, TILE_LABELS } from "./tiles";
+export type { TileId } from "./tiles";

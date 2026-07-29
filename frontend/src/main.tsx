@@ -5,6 +5,7 @@ import "@fontsource-variable/onest";
 import { ToastProvider } from "@/ui";
 import { router } from "@/router";
 import "./styles/tokens.css";
+import "./styles/fonts.css";
 import "./styles.css";
 import "./styles/ui.css";
 import "./styles/layout.css";

@@ -1,9 +1,21 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import {
+  Check,
+  Info,
+  TriangleAlert,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { ToastContext, type Tone } from "./toast-context";
+import { Icon } from "./Icon";
 
 type Toast = { id: number; title: string; tone: Tone };
 
-const MARK: Record<Tone, string> = { info: "·", positive: "✓", danger: "!" };
+const MARK: Record<Tone, LucideIcon> = {
+  info: Info,
+  positive: Check,
+  danger: TriangleAlert,
+};
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -32,7 +44,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           {toasts.map((t) => (
             <li key={t.id} className={`toast toast--${t.tone}`}>
               <span className="toast__mark" aria-hidden="true">
-                {MARK[t.tone]}
+                <Icon icon={MARK[t.tone]} size="sm" />
               </span>
               <span className="toast__title">{t.title}</span>
               <button
@@ -41,7 +53,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 aria-label="Закрыть уведомление"
                 onClick={() => dismiss(t.id)}
               >
-                <span aria-hidden="true">✕</span>
+                <Icon icon={X} size="sm" />
               </button>
             </li>
           ))}

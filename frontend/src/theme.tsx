@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
+import { Icon } from "@/ui";
 
 type Theme = "dark" | "light";
 
@@ -24,7 +26,7 @@ export function ThemeToggle() {
       onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
       aria-label={`Тема: ${theme === "dark" ? "тёмная" : "светлая"}. Переключить`}
     >
-      <span aria-hidden="true">{theme === "dark" ? "☾" : "☀"}</span>
+      <Icon icon={theme === "dark" ? Moon : Sun} size="sm" />
       {theme === "dark" ? "Тёмная" : "Светлая"}
     </button>
   );

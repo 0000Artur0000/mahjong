@@ -292,6 +292,19 @@
   color: var(--color-fg);
 }
 
+/* ---- Icons / tile faces ----------------------------------------------- */
+/* Lucide glyph alignment inside buttons, marks and toggles. */
+.icon {
+  display: block;
+  flex: none;
+}
+
+/* SVG tile face referencing the Noir Gold sprite (public/tiles.svg). */
+.tile-face {
+  display: inline-block;
+  vertical-align: middle;
+}
+
 /* ---- Skeleton -------------------------------------------------------- */
 .skeleton {
   display: inline-block;

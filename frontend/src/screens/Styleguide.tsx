@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { config } from "@/config";
 import { ApiDemo } from "@/showcase/ApiDemo";
 import { Primitives } from "@/showcase/Primitives";
+import { Tile, TILE_IDS } from "@/ui";
 import "../styles/showcase.css";
 
 function useCountdown(from: number): number {
@@ -159,6 +160,22 @@ export function Component() {
           ))}
         </div>
       </div>
+
+      <Plate label="Tiles" title="Тайлсет · Noir Gold">
+        <p className="lede">
+          Спрайт <code>public/tiles.svg</code>: 34 лица, ака-пятёрки, рубашка
+          и пустой тайл. Нотация mjai; у каждого тайла есть текстовое имя для
+          screen reader.
+        </p>
+        <div className="tileset">
+          {TILE_IDS.map((id) => (
+            <figure key={id} className="tileset__item">
+              <Tile tile={id} width={54} />
+              <figcaption className="tileset__label">{id}</figcaption>
+            </figure>
+          ))}
+        </div>
+      </Plate>
 
       <Plate label="Color" title="Семантические токены">
         <div className="swatches">
