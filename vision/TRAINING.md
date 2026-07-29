@@ -48,10 +48,10 @@ PYTHONPATH=vision/src python3 vision/scripts/riichi_litert.py \
   /path/to/mahjong_yolo.tflite /path/to/photos/* --nearest-hand
 ```
 
-`--nearest-hand` uses the lower guided zone (`52%..88%` of image height), so
-small physical tiles reach the model at roughly twice the full-frame scale.
-The region is a capture-protocol calibration value, not automatic table-role
-inference.
+`--nearest-hand` compares the lower guided zone with three overlapping crops,
+then keeps a coherent 10–18-tile hand. Sparse detections are rejected instead
+of being reported as a hand. The regions are capture-protocol calibration
+values, not automatic table-role inference.
 
 ## Real-photo review gate
 
@@ -85,6 +85,7 @@ The review draft is loaded into pinned CVAT `v2.51.0` at
 and CVAT volumes stay outside Git.
 
 The frozen five-photo acceptance set is separate at
-`http://localhost:8080/tasks/2`: 5 frames, 1 job, 37 labels and 51 initial
-rectangles. Correct these proposals before measuring exact-hand accuracy;
+`http://localhost:8080/tasks/2`: 5 frames, 1 job and 37 labels. The current
+strict hand-only pass rejects two sparse scenes and proposes 36 rectangles on
+the other three. Correct these proposals before measuring exact-hand accuracy;
 never use this task for training, threshold tuning or model selection.

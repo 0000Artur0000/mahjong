@@ -7,6 +7,8 @@ import json
 from math import isfinite
 from pathlib import Path
 
+from dorahub_vision.layout import TileBox, cluster_layout
+
 SOURCE_CLASSES = (
     "1m", "1p", "1s", "E",
     "2m", "2p", "2s", "S",
@@ -20,6 +22,13 @@ SOURCE_CLASSES = (
     "unknown", "0m", "0p", "0s",
 )
 NEAREST_HAND_REGION = (0.0, 0.52, 1.0, 0.88)
+NEAREST_HAND_TILES = (
+    (0.0, 0.40, 0.6, 0.92),
+    (0.2, 0.40, 0.8, 0.92),
+    (0.4, 0.40, 1.0, 0.92),
+)
+MIN_HAND_TILES = 10
+MAX_HAND_TILES = 18
 
 
 def predict(
@@ -134,6 +143,57 @@ def predict(
     return _nms(candidates, iou_threshold)
 
 
+def predict_nearest_hand(
+    model_path: Path,
+    image_path: Path,
+    *,
+    confidence: float = 0.2,
+    iou_threshold: float = 0.45,
+) -> list[dict[str, object]]:
+    guided = predict(
+        model_path,
+        image_path,
+        confidence=confidence,
+        iou_threshold=iou_threshold,
+        region=NEAREST_HAND_REGION,
+    )
+    tiled = _nms(
+        [
+            detection
+            for region in NEAREST_HAND_TILES
+            for detection in predict(
+                model_path,
+                image_path,
+                confidence=confidence,
+                iou_threshold=iou_threshold,
+                region=region,
+            )
+        ],
+        iou_threshold,
+    )
+    return _choose_hand(guided, tiled)
+
+
+def _choose_hand(
+    guided: list[dict[str, object]],
+    tiled: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    candidates = []
+    for detections in (tiled, guided):
+        if not detections:
+            continue
+        boxes = [TileBox(*detection["box"]) for detection in detections]
+        hand = cluster_layout(boxes).hand
+        selected = [
+            detection
+            for detection, box in zip(detections, boxes, strict=True)
+            if hand is not None and box in hand.tiles
+        ]
+        if MIN_HAND_TILES <= len(selected) <= MAX_HAND_TILES:
+            candidates.append(selected)
+    return max(candidates, key=len, default=[])
+
+
 def _nms(
     detections: list[dict[str, object]], threshold: float
 ) -> list[dict[str, object]]:
@@ -165,11 +225,10 @@ def main() -> None:
     parser.add_argument("--nearest-hand", action="store_true")
     args = parser.parse_args()
     for image in args.images:
-        detections = predict(
-            args.model,
-            image,
-            confidence=args.confidence,
-            region=NEAREST_HAND_REGION if args.nearest_hand else None,
+        detections = (
+            predict_nearest_hand(args.model, image, confidence=args.confidence)
+            if args.nearest_hand
+            else predict(args.model, image, confidence=args.confidence)
         )
         detections.sort(key=lambda item: item["box"][0])
         print(json.dumps({"image": str(image), "detections": detections}))

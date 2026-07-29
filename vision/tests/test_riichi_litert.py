@@ -1,6 +1,12 @@
 import unittest
 
-from vision.scripts.riichi_litert import SOURCE_CLASSES, _iou, _nms, predict
+from vision.scripts.riichi_litert import (
+    SOURCE_CLASSES,
+    _choose_hand,
+    _iou,
+    _nms,
+    predict,
+)
 
 
 class RiichiLiteRTTest(unittest.TestCase):
@@ -21,6 +27,27 @@ class RiichiLiteRTTest(unittest.TestCase):
             predict(None, None, confidence=float("nan"))
         with self.assertRaises(ValueError):
             predict(None, None, region=(0.0, 0.9, 1.0, 0.5))
+
+    def test_nearest_hand_rejects_sparse_noise(self) -> None:
+        sparse = [
+            {
+                "tile": "1m",
+                "confidence": 0.9,
+                "box": [0.1 + index * 0.05, 0.7, 0.04, 0.06],
+            }
+            for index in range(7)
+        ]
+        hand = [
+            {
+                "tile": "1m",
+                "confidence": 0.9,
+                "box": [0.1 + index * 0.04, 0.7, 0.035, 0.05],
+            }
+            for index in range(13)
+        ]
+
+        self.assertEqual(_choose_hand(sparse, sparse), [])
+        self.assertEqual(_choose_hand(sparse, hand), hand)
 
 
 if __name__ == "__main__":
