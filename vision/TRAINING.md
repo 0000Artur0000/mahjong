@@ -76,3 +76,10 @@ confidence/top-3 in `predictions.jsonl`. It intentionally has no `data.yaml`:
 The local 2026-07-29 draft contains 257 images and 7,126 proposed boxes across
 37/37 classes. Kaggle files have no EXIF and 141 distinct resolutions, so
 capture sessions cannot be recovered automatically.
+
+## Local CVAT review
+
+The review draft is loaded into pinned CVAT `v2.51.0` at
+`http://localhost:8080/tasks/1`. The verified task has 257 frames, 9 jobs,
+37 labels and 7,126 rectangles. Local credentials, source images, annotations
+and CVAT volumes stay outside Git.
