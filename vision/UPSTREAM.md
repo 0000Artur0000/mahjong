@@ -16,6 +16,14 @@ Dorahub независимо реализует только совместим�
 boundary: 34 базовых вида, красные пятёрки, common dataset aliases, dora
 rotation и зоны hand/dora/discard.
 
+## Synthetic smoke assets
+
+[`FluffyStuff/riichi-mahjong-tiles`](https://github.com/FluffyStuff/riichi-mahjong-tiles)
+commit `26e127ba2117f45cdce5ea0225748cc0cfad3169` содержит public-domain
+PNG/SVG assets. Они используются только для проверки 37-class dataset/training
+pipeline. Synthetic metrics не считаются доказательством качества на фото
+физических тайлов.
+
 ## Legacy layout baseline
 
 Geometry/layout основан на [`haitaks/mahjong`](https://github.com/haitaks/mahjong)

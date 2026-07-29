@@ -9,7 +9,8 @@ from .layout import MAX_TILES, TileBox
 NUMBERED_TILES = tuple(f"{rank}{suit}" for suit in "mps" for rank in range(1, 10))
 HONOR_TILES = ("E", "S", "W", "N", "P", "F", "C")
 RED_FIVES = ("0m", "0p", "0s")
-FACE_TILES = frozenset(NUMBERED_TILES + HONOR_TILES + RED_FIVES)
+MODEL_TILES = NUMBERED_TILES + HONOR_TILES + RED_FIVES
+FACE_TILES = frozenset(MODEL_TILES)
 NON_FACE_TILES = frozenset(("back", "unknown"))
 ROLES = frozenset(("hand", "dora", "discard"))
 

@@ -3,6 +3,7 @@
 from .health import health
 from .riichi import (
     FACE_TILES,
+    MODEL_TILES,
     RED_FIVES,
     RiichiDetection,
     TileCandidate,
@@ -13,6 +14,7 @@ from .riichi import (
 
 __all__ = [
     "FACE_TILES",
+    "MODEL_TILES",
     "RED_FIVES",
     "RiichiDetection",
     "TileCandidate",
