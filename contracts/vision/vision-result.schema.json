@@ -4,18 +4,31 @@
   "title": "VisionResult",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "modelVersion", "status", "detections", "warnings"],
+  "required": [
+    "schemaVersion",
+    "modelVersion",
+    "status",
+    "detections",
+    "zones",
+    "warnings",
+    "rejectionReason"
+  ],
   "properties": {
-    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "schemaVersion": { "const": 2 },
     "modelVersion": { "type": "string", "minLength": 1 },
     "status": { "enum": ["accepted", "rejected"] },
     "detections": {
       "type": "array",
+      "maxItems": 256,
       "items": {
         "type": "object",
-        "required": ["tile", "confidence", "box"],
+        "additionalProperties": false,
+        "required": ["tile", "confidence", "box", "role", "alternatives"],
         "properties": {
-          "tile": { "type": "string" },
+          "tile": {
+            "type": "string",
+            "pattern": "^(?:[1-9][mps]|0[mps]|[ESWNPFC]|back|unknown)$"
+          },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
           "box": {
             "type": "array",
@@ -28,11 +41,61 @@
               { "type": "number" }
             ],
             "items": false
+          },
+          "role": { "enum": ["hand", "dora", "discard"] },
+          "alternatives": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["tile", "confidence"],
+              "properties": {
+                "tile": {
+                  "type": "string",
+                  "pattern": "^(?:[1-9][mps]|0[mps]|[ESWNPFC]|back|unknown)$"
+                },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            }
           }
+        }
+      }
+    },
+    "zones": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hand", "doraIndicators", "doras", "discards"],
+      "properties": {
+        "hand": {
+          "type": "array",
+          "maxItems": 18,
+          "items": { "$ref": "#/$defs/faceTile" }
+        },
+        "doraIndicators": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/faceTile" }
+        },
+        "doras": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/faceTile" }
+        },
+        "discards": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/faceTile" }
         }
       }
     },
     "warnings": { "type": "array", "items": { "type": "string" } },
     "rejectionReason": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "faceTile": {
+      "type": "string",
+      "pattern": "^(?:[1-9][mps]|0[mps]|[ESWNPFC])$"
+    }
   }
 }

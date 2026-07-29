@@ -1,6 +1,7 @@
 # Vision evaluation metrics — schema 1
 
-Единица отчёта — одна scene. Ground truth содержит tile instances и groups;
+Единица отчёта — одна scene с обязательной ближайшей рукой и optional
+dora/discard zones. Ground truth содержит tile instances и groups;
 `predictions` уже сопоставлены с ground truth, а лишние detections считаются
 отдельно. Scene считается автоматически принятой, если её scene confidence не
 ниже зафиксированного в отчёте `acceptanceThreshold`.
