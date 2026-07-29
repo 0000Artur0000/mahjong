@@ -26,6 +26,35 @@ PYTHONPATH=vision/src python3 vision/scripts/riichi_synthetic.py check \
 
 Do not commit generated images, private acceptance photos, or model weights.
 
+## Single-class COCO import
+
+The local `coco_mahjong` archive already contains COCO boxes. Convert every
+category to the generic `tile` class while preserving its train/validation
+split:
+
+```bash
+PYTHONPATH=. python3 vision/scripts/coco_tiles.py \
+  /path/to/coco_mahjong /tmp/coco-mahjong-yolo
+```
+
+The importer clips the source's one-pixel out-of-bounds boxes and symlinks the
+images instead of copying gigabytes. The audited local archive has 1,709 train
+images with 11,181 boxes and 427 validation images with 3,352 boxes. Keep it
+and derived weights outside Git until its source and redistribution license
+are confirmed.
+
+The 2026-07-30 single-class experiment combined that archive with the Haitaks
+layout baseline and fine-tuned YOLO26n for three epochs at 640 px with
+180-degree rotation and mosaic. On the combined 477-image validation split it
+improved precision/recall/mAP50 from `0.633/0.546/0.592` to
+`0.861/0.861/0.907`.
+
+The artifact is not a product replacement: on the five frozen club photos it
+returned `25/20/24/17/24` boxes, missed wall tiles and falsely detected the
+round score counters. More epochs on the same domain cannot supply those
+missing hard negatives. Label separate full-table club scenes containing
+walls, counters, racks and paper before the next fine-tune.
+
 ## Latest local smoke
 
 On 2026-07-29 the default generator produced 518 scenes and 8,034 boxes.
