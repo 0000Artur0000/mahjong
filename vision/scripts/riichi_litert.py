@@ -27,6 +27,11 @@ NEAREST_HAND_TILES = (
     (0.2, 0.40, 0.8, 0.92),
     (0.4, 0.40, 1.0, 0.92),
 )
+FULL_FIELD_REGIONS = tuple(
+    (left, top, left + 0.5, top + 0.35)
+    for top in (0.0, 0.22, 0.43, 0.65)
+    for left in (0.0, 0.25, 0.5)
+)
 MIN_HAND_TILES = 10
 MAX_HAND_TILES = 18
 
@@ -174,6 +179,57 @@ def predict_nearest_hand(
     return _choose_hand(guided, tiled)
 
 
+def predict_all_tiles(
+    model_path: Path,
+    image_path: Path,
+    *,
+    confidence: float = 0.2,
+    iou_threshold: float = 0.3,
+) -> list[dict[str, object]]:
+    from PIL import Image
+
+    # ponytail: twelve fresh calls favor recall; reuse one interpreter when
+    # latency matters.
+    detections = _nms(
+        [
+            detection
+            for region in FULL_FIELD_REGIONS
+            for detection in predict(
+                model_path,
+                image_path,
+                confidence=confidence,
+                iou_threshold=iou_threshold,
+                region=region,
+            )
+        ],
+        iou_threshold,
+    )
+    with Image.open(image_path) as image:
+        return _generic_tiles(detections, image.size)
+
+
+def _generic_tiles(
+    detections: list[dict[str, object]],
+    image_size: tuple[int, int],
+) -> list[dict[str, object]]:
+    image_width, image_height = image_size
+    tiles = []
+    for detection in detections:
+        _, _, width, height = detection["box"]
+        pixel_width, pixel_height = width * image_width, height * image_height
+        aspect = pixel_width / pixel_height
+        if min(pixel_width, pixel_height) < 8 or not 0.4 <= aspect <= 1.8:
+            continue
+        tiles.append(
+            {
+                "tile": "tile",
+                "confidence": detection["confidence"],
+                "box": detection["box"],
+            }
+        )
+    return tiles
+
+
 def _choose_hand(
     guided: list[dict[str, object]],
     tiled: list[dict[str, object]],
@@ -222,14 +278,25 @@ def main() -> None:
     parser.add_argument("model", type=Path)
     parser.add_argument("images", type=Path, nargs="+")
     parser.add_argument("--confidence", type=float, default=0.2)
-    parser.add_argument("--nearest-hand", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--nearest-hand", action="store_true")
+    mode.add_argument("--all-tiles", action="store_true")
     args = parser.parse_args()
     for image in args.images:
-        detections = (
-            predict_nearest_hand(args.model, image, confidence=args.confidence)
-            if args.nearest_hand
-            else predict(args.model, image, confidence=args.confidence)
-        )
+        if args.all_tiles:
+            detections = predict_all_tiles(
+                args.model,
+                image,
+                confidence=args.confidence,
+            )
+        elif args.nearest_hand:
+            detections = predict_nearest_hand(
+                args.model,
+                image,
+                confidence=args.confidence,
+            )
+        else:
+            detections = predict(args.model, image, confidence=args.confidence)
         detections.sort(key=lambda item: item["box"][0])
         print(json.dumps({"image": str(image), "detections": detections}))
 

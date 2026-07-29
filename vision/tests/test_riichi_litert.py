@@ -3,6 +3,7 @@ import unittest
 from vision.scripts.riichi_litert import (
     SOURCE_CLASSES,
     _choose_hand,
+    _generic_tiles,
     _iou,
     _nms,
     predict,
@@ -48,6 +49,23 @@ class RiichiLiteRTTest(unittest.TestCase):
 
         self.assertEqual(_choose_hand(sparse, sparse), [])
         self.assertEqual(_choose_hand(sparse, hand), hand)
+
+    def test_full_field_returns_only_tile_boxes(self) -> None:
+        detections = [
+            {
+                "tile": "1m",
+                "confidence": 0.9,
+                "box": [0.5, 0.5, 0.04, 0.04],
+                "alternatives": [{"tile": "2m", "confidence": 0.1}],
+            },
+            {"tile": "2m", "confidence": 0.8, "box": [0.5, 0.5, 0.2, 0.01]},
+            {"tile": "3m", "confidence": 0.7, "box": [0.5, 0.5, 0.005, 0.005]},
+        ]
+
+        self.assertEqual(
+            _generic_tiles(detections, (1000, 1000)),
+            [{"tile": "tile", "confidence": 0.9, "box": [0.5, 0.5, 0.04, 0.04]}],
+        )
 
 
 if __name__ == "__main__":

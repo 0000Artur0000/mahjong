@@ -53,6 +53,17 @@ then keeps a coherent 10–18-tile hand. Sparse detections are rejected instead
 of being reported as a hand. The regions are capture-protocol calibration
 values, not automatic table-role inference.
 
+For high-recall full-field localization without tile classes:
+
+```bash
+PYTHONPATH=vision/src python3 vision/scripts/riichi_litert.py \
+  /path/to/mahjong_yolo.tflite /path/to/photos/* --all-tiles
+```
+
+`--all-tiles` runs 12 overlapping crops, merges duplicates and returns the
+single label `tile`. It detects readable faces; backs, walls and stacked tiles
+still require single-class real-photo labels and fine-tuning.
+
 ## Real-photo review gate
 
 Create a review-only YOLO draft from the audited Kaggle v1 source and LiteRT
@@ -89,3 +100,7 @@ The frozen five-photo acceptance set is separate at
 strict hand-only pass rejects two sparse scenes and proposes 36 rectangles on
 the other three. Correct these proposals before measuring exact-hand accuracy;
 never use this task for training, threshold tuning or model selection.
+
+Full-field generic localization is separate at `http://localhost:8080/tasks/3`:
+5 frames, 1 label (`tile`) and 194 proposals. It is a high-recall review task,
+not ground truth.
