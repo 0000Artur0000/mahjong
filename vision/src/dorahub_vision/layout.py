@@ -1,10 +1,85 @@
 """Geometry-first layout parser adapted from haitaks/mahjong."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import atan2, cos, fsum, hypot, isfinite, sin
 from statistics import median, pstdev
 
 MAX_TILES = 256
+
+
+@dataclass(frozen=True)
+class TableFrame:
+    """Project the photographed table quadrilateral onto a unit square."""
+
+    corners: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ]
+    _matrix: tuple[float, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            len(self.corners) != 4
+            or any(
+                len(point) != 2
+                or not all(
+                    not isinstance(value, bool)
+                    and isfinite(value)
+                    and 0 <= value <= 1
+                    for value in point
+                )
+                for point in self.corners
+            )
+        ):
+            raise ValueError("table corners must be normalized TL, TR, BR, BL")
+        crosses = [
+            (second[0] - first[0]) * (third[1] - second[1])
+            - (second[1] - first[1]) * (third[0] - second[0])
+            for first, second, third in zip(
+                self.corners,
+                (*self.corners[1:], self.corners[0]),
+                (*self.corners[2:], *self.corners[:2]),
+                strict=True,
+            )
+        ]
+        if (
+            any(abs(cross) < 1e-8 for cross in crosses)
+            or min(crosses) < 0 < max(crosses)
+        ):
+            raise ValueError("table corners must form a convex quadrilateral")
+        tl, tr, br, bl = self.corners
+        dx1, dx2 = tr[0] - br[0], bl[0] - br[0]
+        dy1, dy2 = tr[1] - br[1], bl[1] - br[1]
+        dx3 = tl[0] - tr[0] + br[0] - bl[0]
+        dy3 = tl[1] - tr[1] + br[1] - bl[1]
+        determinant = dx1 * dy2 - dx2 * dy1
+        if abs(determinant) < 1e-8:
+            raise ValueError("table corners must form a quadrilateral")
+        g = (dx3 * dy2 - dx2 * dy3) / determinant
+        h = (dx1 * dy3 - dx3 * dy1) / determinant
+        square_to_image = (
+            tr[0] - tl[0] + g * tr[0],
+            bl[0] - tl[0] + h * bl[0],
+            tl[0],
+            tr[1] - tl[1] + g * tr[1],
+            bl[1] - tl[1] + h * bl[1],
+            tl[1],
+            g,
+            h,
+            1.0,
+        )
+        object.__setattr__(self, "_matrix", _invert_3x3(square_to_image))
+
+    def map(self, x: float, y: float) -> tuple[float, float]:
+        a, b, c, d, e, f, g, h, i = self._matrix
+        scale = g * x + h * y + i
+        if abs(scale) < 1e-8:
+            raise ValueError("point lies on the table horizon")
+        return (a * x + b * y + c) / scale, (
+            d * x + e * y + f
+        ) / scale
 
 
 @dataclass(frozen=True)
@@ -59,12 +134,19 @@ class LayoutParams:
     hand_min_tiles: int = 3
     hand_max_tiles: int = 18
     hand_max_rows: int = 3
-    hand_merge_gap_k: float = 6.0
+    hand_merge_gap_k: float = 3.0
     discard_min_tiles: int = 2
+    discard_outlier_k: float = 2.25
     dead_wall_min_tiles: int = 4
     dead_wall_max_tiles: int = 14
     face_threshold: float = 0.1
     player_direction: tuple[float, float] | None = None
+    table_corners: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -73,6 +155,7 @@ class LayoutParams:
                 for value in (
                     self.eps_k,
                     self.hand_merge_gap_k,
+                    self.discard_outlier_k,
                     self.face_threshold,
                 )
             )
@@ -82,6 +165,7 @@ class LayoutParams:
             or self.hand_max_rows < 1
             or self.hand_merge_gap_k <= 0
             or self.discard_min_tiles < 1
+            or self.discard_outlier_k <= 0
             or not 1 <= self.dead_wall_min_tiles <= self.dead_wall_max_tiles
             or not 0 <= self.face_threshold <= 1
             or (
@@ -94,6 +178,8 @@ class LayoutParams:
             )
         ):
             raise ValueError("invalid layout parameters")
+        if self.table_corners is not None:
+            TableFrame(self.table_corners)
 
 
 @dataclass
@@ -110,6 +196,7 @@ class Cluster:
     linearity: float
     role: str = "other"
     heuristic_score: float = 0.0
+    seat: str | None = None
 
     @property
     def tile_count(self) -> int:
@@ -124,6 +211,9 @@ class LayoutResult:
     walls: tuple[Cluster, ...] = ()
     others: tuple[Cluster, ...] = ()
     dead_wall: Cluster | None = None
+    dora: tuple[Cluster, ...] = ()
+    opponent_hands: tuple[Cluster, ...] = ()
+    noise: tuple[Cluster, ...] = ()
 
 
 def cluster_layout(
@@ -140,32 +230,51 @@ def cluster_layout(
     if params is not None and not isinstance(params, LayoutParams):
         raise ValueError("params must be LayoutParams")
     config = params or LayoutParams()
-    clusters = _cluster(tiles, config)
-    hand, dead_wall = _assign_roles(clusters, config)
+    frame = TableFrame(config.table_corners) if config.table_corners else None
+    clusters = _cluster(tiles, config, frame)
+    hand, dead_wall = _assign_roles(clusters, config, frame)
     return LayoutResult(
-        tuple(clusters),
-        hand,
-        tuple(cluster for cluster in clusters if cluster.role == "discard"),
-        tuple(
+        clusters=tuple(clusters),
+        hand=hand,
+        discards=tuple(
+            cluster for cluster in clusters if cluster.role == "discard"
+        ),
+        walls=tuple(
             cluster
             for cluster in clusters
             if cluster.role in {"wall", "dead_wall"}
         ),
-        tuple(cluster for cluster in clusters if cluster.role == "other"),
-        dead_wall,
+        others=tuple(cluster for cluster in clusters if cluster.role == "other"),
+        dead_wall=dead_wall,
+        dora=tuple(cluster for cluster in clusters if cluster.role == "dora"),
+        opponent_hands=tuple(
+            cluster
+            for cluster in clusters
+            if cluster.role == "opponent_hand"
+        ),
+        noise=tuple(cluster for cluster in clusters if cluster.role == "noise"),
     )
 
 
-def _cluster(tiles: tuple[TileBox, ...], params: LayoutParams) -> list[Cluster]:
+def _cluster(
+    tiles: tuple[TileBox, ...],
+    params: LayoutParams,
+    frame: TableFrame | None = None,
+) -> list[Cluster]:
+    points = [_point(tile, frame) for tile in tiles]
+    scales = [_tile_scale(tile, frame) for tile in tiles]
     # ponytail: O(n²) is bounded by MAX_TILES; add a spatial index only if profiling requires it.
     neighbors = [
         [
             other
-            for other, candidate in enumerate(tiles)
-            if hypot(tile.cx - candidate.cx, tile.cy - candidate.cy)
-            < params.eps_k * (tile.size + candidate.size) / 2
+            for other in range(len(tiles))
+            if hypot(
+                points[index][0] - points[other][0],
+                points[index][1] - points[other][1],
+            )
+            < params.eps_k * (scales[index] + scales[other]) / 2
         ]
-        for tile in tiles
+        for index in range(len(tiles))
     ]
     visited = [False] * len(tiles)
     labels = [-1] * len(tiles)
@@ -195,26 +304,41 @@ def _cluster(tiles: tuple[TileBox, ...], params: LayoutParams) -> list[Cluster]:
             groups[label].append(tile)
         else:
             singletons.append([tile])
-    clusters = [_describe(tuple(group)) for group in groups + singletons]
+    clusters = [
+        _describe(tuple(group), frame) for group in groups + singletons
+    ]
     return sorted(clusters, key=lambda cluster: cluster.tile_count, reverse=True)
 
 
-def _describe(tiles: tuple[TileBox, ...]) -> Cluster:
-    xs = [tile.cx for tile in tiles]
-    ys = [tile.cy for tile in tiles]
-    scale = median(tile.size for tile in tiles)
+def _describe(
+    tiles: tuple[TileBox, ...], frame: TableFrame | None = None
+) -> Cluster:
+    points = [_point(tile, frame) for tile in tiles]
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    scale = median(_tile_scale(tile, frame) for tile in tiles)
     axis, linearity = _principal_axis(xs, ys)
-    tiles = _order_tiles(tiles, axis, scale)
+    tiles = _order_tiles(tiles, axis, scale, frame)
     along = [x * axis[0] + y * axis[1] for x, y in zip(xs, ys, strict=True)]
     across = [-x * axis[1] + y * axis[0] for x, y in zip(xs, ys, strict=True)]
+    corners = [
+        frame.map(x, y) if frame else (x, y)
+        for tile in tiles
+        for x, y in (
+            (tile.cx - tile.width / 2, tile.cy - tile.height / 2),
+            (tile.cx + tile.width / 2, tile.cy - tile.height / 2),
+            (tile.cx + tile.width / 2, tile.cy + tile.height / 2),
+            (tile.cx - tile.width / 2, tile.cy + tile.height / 2),
+        )
+    ]
     return Cluster(
         tiles,
         (fsum(xs) / len(xs), fsum(ys) / len(ys)),
         (
-            min(tile.cx - tile.width / 2 for tile in tiles),
-            min(tile.cy - tile.height / 2 for tile in tiles),
-            max(tile.cx + tile.width / 2 for tile in tiles),
-            max(tile.cy + tile.height / 2 for tile in tiles),
+            min(point[0] for point in corners),
+            min(point[1] for point in corners),
+            max(point[0] for point in corners),
+            max(point[1] for point in corners),
         ),
         _count_bands(across, scale),
         _count_bands(along, scale),
@@ -277,16 +401,18 @@ def _order_tiles(
     tiles: tuple[TileBox, ...],
     axis: tuple[float, float],
     scale: float,
+    frame: TableFrame | None = None,
 ) -> tuple[TileBox, ...]:
     rows: list[list[tuple[float, float, TileBox]]] = []
     projected = sorted(
         [
             (
-                -tile.cx * axis[1] + tile.cy * axis[0],
-                tile.cx * axis[0] + tile.cy * axis[1],
+                -x * axis[1] + y * axis[0],
+                x * axis[0] + y * axis[1],
                 tile,
             )
             for tile in tiles
+            for x, y in (_point(tile, frame),)
         ],
         key=lambda item: (item[0], item[1]),
     )
@@ -302,12 +428,31 @@ def _order_tiles(
 
 
 def _assign_roles(
-    clusters: list[Cluster], params: LayoutParams
+    clusters: list[Cluster],
+    params: LayoutParams,
+    frame: TableFrame | None = None,
 ) -> tuple[Cluster | None, Cluster | None]:
+    has_face_evidence = any(
+        tile.face_score is not None
+        for cluster in clusters
+        for tile in cluster.tiles
+    )
+    if frame:
+        for cluster in clusters:
+            if not (
+                -0.1 <= cluster.centroid[0] <= 1.1
+                and -0.1 <= cluster.centroid[1] <= 1.1
+            ):
+                cluster.role = "noise"
     walls = [
         cluster
         for cluster in clusters
-        if cluster.tile_count >= params.dead_wall_min_tiles
+        if cluster.role == "other"
+        and cluster.tile_count >= params.dead_wall_min_tiles
+        and (
+            cluster.tile_count > params.dead_wall_min_tiles
+            or _face_count(cluster, params.face_threshold) > 0
+        )
         and cluster.rows <= 2
         and cluster.linearity >= 0.6
         and _back_fraction(cluster, params.face_threshold) > 0.5
@@ -317,206 +462,376 @@ def _assign_roles(
             wall, params.face_threshold
         )
 
-    topology = _wall_topology(walls) or (
+    dead_wall = max(
         (
-            median(cluster.centroid[0] for cluster in clusters),
-            median(cluster.centroid[1] for cluster in clusters),
+            wall
+            for wall in walls
+            if wall.tile_count <= params.dead_wall_max_tiles
+            and 1 <= _face_count(wall, params.face_threshold) <= 5
         ),
-        None,
-        0.0,
-    )
-    available = [cluster for cluster in clusters if cluster.role == "other"]
-    max_distance = max(
-        (_table_distance(cluster, topology) for cluster in available),
-        default=1.0,
-    )
-    max_scale = max((cluster.scale for cluster in available), default=1.0)
-    direction = params.player_direction or (
-        _infer_player_direction(available, topology, max_distance)
-        if available
-        else (0.0, 1.0)
-    )
-    candidates = [
-        (score, cluster)
-        for cluster in available
-        if (
-            score := _hand_score(
-                cluster,
-                direction,
-                topology,
-                max_distance,
-                max_scale,
-                params,
-            )
-        )
-        is not None
-    ]
-    hand = None
-    if candidates:
-        score, hand = max(candidates, key=lambda item: item[0])
-        parts = [hand]
-        merged = hand
-        remaining = sorted(
-            [
-                cluster
-                for cluster in available
-                if cluster is not hand
-                and (
-                    not any(tile.face_score is not None for tile in cluster.tiles)
-                    or _face_count(cluster, params.face_threshold) > 0
-                )
-            ],
-            key=lambda cluster: _bounds_gap(hand.bounds, cluster.bounds),
-        )
-        while True:
-            companion = next(
-                (
-                    cluster
-                    for cluster in remaining
-                    if sum(item.tile_count for item in parts) + cluster.tile_count
-                    <= params.hand_max_tiles
-                    and _is_hand_companion(
-                        merged,
-                        cluster,
-                        direction,
-                        topology[0],
-                        params,
-                    )
-                ),
-                None,
-            )
-            if companion is None:
-                break
-            parts.append(companion)
-            remaining.remove(companion)
-            merged = _describe(
-                tuple(tile for cluster in parts for tile in cluster.tiles)
-            )
-        merged.role, merged.heuristic_score = "hand", score
-        clusters[:] = [
-            merged,
-            *(cluster for cluster in clusters if cluster not in parts),
-        ]
-        hand = merged
-
-    dead_wall = next(
-        (
-            cluster
-            for cluster in sorted(
-                walls,
-                key=lambda item: sum(
-                    tile.face_score or 0 for tile in item.tiles
-                ),
-                reverse=True,
-            )
-            if cluster.tile_count <= params.dead_wall_max_tiles
-            and 1
-            <= _face_count(cluster, params.face_threshold)
-            <= 5
-        ),
-        None,
+        key=lambda wall: sum(tile.face_score or 0 for tile in wall.tiles),
+        default=None,
     )
     if dead_wall is not None:
         dead_wall.role = "dead_wall"
 
-    for cluster in clusters:
-        if cluster.role != "other":
-            continue
-        if (
-            topology[2] > 0
-            and _table_distance(cluster, topology) < topology[2]
-            and cluster.tile_count >= params.discard_min_tiles
+    dora = min(
+        (
+            cluster
+            for cluster in clusters
+            if cluster.role == "other"
+            and 2 <= cluster.tile_count <= 5
+            and _back_fraction(cluster, params.face_threshold) > 0.5
             and _face_count(cluster, params.face_threshold) > 0
+            and walls
+            and min(_cluster_gap(cluster, wall) for wall in walls)
+            <= 4 * max(cluster.scale, median(wall.scale for wall in walls))
+        ),
+        key=lambda cluster: min(_cluster_gap(cluster, wall) for wall in walls),
+        default=None,
+    )
+    if dora is not None:
+        dora.role = "dora"
+
+    direction = _normalize(
+        params.player_direction or _infer_player_direction(clusters)
+    )
+    available = [cluster for cluster in clusters if cluster.role == "other"]
+    hand_candidates = [
+        cluster
+        for cluster in available
+        if not has_face_evidence
+        or not any(tile.face_score is not None for tile in cluster.tiles)
+        or _face_count(cluster, params.face_threshold) > 0
+    ]
+    hand_groups = [
+        parts
+        for parts in _components(
+            hand_candidates,
+            params.hand_merge_gap_k,
+            radial_direction=direction,
+        )
+        if sum(cluster.tile_count for cluster in parts) >= params.hand_min_tiles
+        and _merged(parts, frame).rows <= params.hand_max_rows
+    ]
+    hand = None
+    if hand_groups:
+        parts = max(
+            hand_groups,
+            key=lambda group: (
+                _projection(_merged(group, frame).centroid, direction)
+                + _merged(group, frame).scale
+                * min(sum(cluster.tile_count for cluster in group), 14)
+                / 2
+            ),
+        )
+        hand = _replace(
+            clusters, parts, "hand", frame=frame, seat="self"
+        )
+
+    available = [cluster for cluster in clusters if cluster.role == "other"]
+    if not available:
+        return hand, dead_wall
+    face_clusters = [
+        cluster
+        for cluster in available
+        if _face_count(cluster, params.face_threshold) > 0
+    ]
+    radial_clusters = face_clusters or available
+    center = _center(radial_clusters)
+    directions = _seat_directions(direction)
+    for seat in ("left", "opposite", "right"):
+        seat_direction = directions[seat]
+        opponent_groups = _components(
+            [
+                cluster
+                for cluster in clusters
+                if cluster.role == "other"
+            ],
+            params.hand_merge_gap_k,
+            radial_direction=seat_direction,
+        )
+        wall_barrier = max(
+            (
+                _projection(wall.centroid, seat_direction)
+                - _projection(center, seat_direction)
+                for wall in walls
+                if _seat(wall.centroid, center, directions) == seat
+            ),
+            default=0.0,
+        )
+        scene_radius = max(
+            0.5,
+            2
+            * median(
+                hypot(
+                    cluster.centroid[0] - center[0],
+                    cluster.centroid[1] - center[1],
+                )
+                for cluster in radial_clusters
+            )
+        )
+        candidates = []
+        for parts in opponent_groups:
+            merged = _merged(parts, frame)
+            outward = _projection(merged.centroid, seat_direction) - _projection(
+                center, seat_direction
+            )
+            tangent = -seat_direction[1], seat_direction[0]
+            sideways = abs(
+                _projection(merged.centroid, tangent)
+                - _projection(center, tangent)
+            )
+            edge_seed = (
+                (seat == "left" and merged.centroid[0] <= 0.15)
+                or (seat == "right" and merged.centroid[0] >= 0.85)
+                or (seat == "opposite" and merged.centroid[1] <= 0.15)
+            )
+            if (
+                3 <= merged.tile_count <= params.hand_max_tiles
+                and (
+                    outward
+                    > wall_barrier + merged.scale
+                    or (not wall_barrier and edge_seed)
+                )
+                and outward <= scene_radius
+                and (
+                    seat == "opposite"
+                    or outward >= 1.5 * sideways
+                )
+                and abs(
+                    merged.axis[0] * seat_direction[0]
+                    + merged.axis[1] * seat_direction[1]
+                )
+                <= 0.65
+            ):
+                candidates.append((outward, parts))
+        if candidates:
+            _, parts = max(candidates, key=lambda item: item[0])
+            _replace(
+                clusters,
+                parts,
+                "opponent_hand",
+                frame=frame,
+                seat=seat,
+            )
+
+    discard_candidates = [
+        cluster
+        for cluster in clusters
+        if cluster.role == "other"
+        and cluster.tile_count >= params.discard_min_tiles
+        and _face_count(cluster, params.face_threshold) > 0
+    ]
+    if discard_candidates:
+        discard_center = _center(discard_candidates)
+        distances = [
+            hypot(
+                cluster.centroid[0] - discard_center[0],
+                cluster.centroid[1] - discard_center[1],
+            )
+            for cluster in discard_candidates
+        ]
+        limit = max(
+            params.discard_outlier_k * median(distances),
+            params.hand_merge_gap_k
+            * median(cluster.scale for cluster in discard_candidates),
+        )
+        for cluster, distance in zip(
+            discard_candidates, distances, strict=True
         ):
-            cluster.role, cluster.heuristic_score = "discard", cluster.regularity
+            if distance <= limit:
+                cluster.seat = _seat(
+                    cluster.centroid, discard_center, directions
+                )
+                cluster.role, cluster.heuristic_score = (
+                    "discard",
+                    1 - distance / limit if limit else 1.0,
+                )
+            else:
+                cluster.role = "noise"
     return hand, dead_wall
 
 
-def _hand_score(
-    cluster: Cluster,
-    direction: tuple[float, float],
-    topology: tuple[
-        tuple[float, float],
-        tuple[float, float, float] | None,
-        float,
-    ],
-    max_distance: float,
-    max_scale: float,
-    params: LayoutParams,
-) -> float | None:
-    if (
-        cluster.tile_count < params.hand_min_tiles
-        or cluster.rows > params.hand_max_rows
-    ):
-        return None
-    center = topology[0]
-    dx = cluster.centroid[0] - center[0]
-    dy = cluster.centroid[1] - center[1]
-    radius = hypot(dx, dy)
-    direction_size = hypot(*direction)
-    if radius == 0:
-        if max_distance:
-            return None
-        side = radial = 1.0
-    else:
-        side = (dx * direction[0] + dy * direction[1]) / (
-            radius * direction_size
-        )
-        radial = _table_distance(cluster, topology) / max_distance
-    distance = _table_distance(cluster, topology)
-    if side <= 0 or (topology[2] > 0 and distance < topology[2]):
-        return None
-    count = min(1.0, cluster.tile_count / 13)
-    relative_scale = cluster.scale / max_scale
-    overflow = max(0, cluster.tile_count - params.hand_max_tiles) / params.hand_max_tiles
-    return (
-        0.4 * side
-        + 0.3 * radial
-        + 0.2 * relative_scale
-        + 0.1 * count
-        - 0.25 * overflow
+def _components(
+    clusters: list[Cluster],
+    gap_k: float,
+    *,
+    radial_direction: tuple[float, float] | None = None,
+) -> list[list[Cluster]]:
+    remaining = list(clusters)
+    groups: list[list[Cluster]] = []
+    while remaining:
+        group = [remaining.pop(0)]
+        for cluster in group:
+            neighbors = [
+                candidate
+                for candidate in remaining
+                if 0.5 <= cluster.scale / candidate.scale <= 2
+                and _cluster_gap(cluster, candidate)
+                <= ((gap_k + 1) if radial_direction else gap_k)
+                * max(cluster.scale, candidate.scale)
+                and (
+                    radial_direction is None
+                    or _projected_gap(
+                        cluster, candidate, radial_direction
+                    )
+                    <= max(cluster.scale, candidate.scale)
+                )
+            ]
+            group.extend(neighbors)
+            for neighbor in neighbors:
+                remaining.remove(neighbor)
+        groups.append(group)
+    return groups
+
+
+def _merged(
+    clusters: list[Cluster], frame: TableFrame | None = None
+) -> Cluster:
+    return _describe(
+        tuple(tile for cluster in clusters for tile in cluster.tiles),
+        frame,
     )
 
 
-def _is_hand_companion(
-    hand: Cluster,
-    candidate: Cluster,
-    direction: tuple[float, float],
-    center: tuple[float, float],
-    params: LayoutParams,
-) -> bool:
-    if hand.tile_count + candidate.tile_count > params.hand_max_tiles:
-        return False
-    sizes = hand.scale / candidate.scale
-    dx = candidate.centroid[0] - center[0]
-    dy = candidate.centroid[1] - center[1]
+def _replace(
+    clusters: list[Cluster],
+    parts: list[Cluster],
+    role: str,
+    *,
+    frame: TableFrame | None = None,
+    seat: str | None = None,
+) -> Cluster:
+    merged = _merged(parts, frame)
+    merged.role, merged.seat = role, seat
+    clusters[:] = [
+        merged,
+        *(cluster for cluster in clusters if cluster not in parts),
+    ]
+    return merged
+
+
+def _center(clusters: list[Cluster]) -> tuple[float, float]:
     return (
-        0.5 <= sizes <= 2
-        and dx * direction[0] + dy * direction[1] > 0
-        and _bounds_gap(hand.bounds, candidate.bounds)
-        <= params.hand_merge_gap_k * max(hand.scale, candidate.scale)
+        median(cluster.centroid[0] for cluster in clusters),
+        median(cluster.centroid[1] for cluster in clusters),
+    )
+
+
+def _normalize(direction: tuple[float, float]) -> tuple[float, float]:
+    size = hypot(*direction)
+    return direction[0] / size, direction[1] / size
+
+
+def _seat_directions(
+    player: tuple[float, float],
+) -> dict[str, tuple[float, float]]:
+    x, y = player
+    return {
+        "self": (x, y),
+        "right": (y, -x),
+        "opposite": (-x, -y),
+        "left": (-y, x),
+    }
+
+
+def _seat(
+    point: tuple[float, float],
+    center: tuple[float, float],
+    directions: dict[str, tuple[float, float]],
+) -> str:
+    delta = point[0] - center[0], point[1] - center[1]
+    return max(
+        directions,
+        key=lambda seat: delta[0] * directions[seat][0]
+        + delta[1] * directions[seat][1],
+    )
+
+
+def _projection(
+    point: tuple[float, float], direction: tuple[float, float]
+) -> float:
+    return point[0] * direction[0] + point[1] * direction[1]
+
+
+def _projected_gap(
+    first: Cluster,
+    second: Cluster,
+    direction: tuple[float, float],
+) -> float:
+    def extent(cluster: Cluster) -> tuple[float, float]:
+        left, top, right, bottom = cluster.bounds
+        values = [
+            _projection(point, direction)
+            for point in (
+                (left, top),
+                (right, top),
+                (right, bottom),
+                (left, bottom),
+            )
+        ]
+        return min(values), max(values)
+
+    first_min, first_max = extent(first)
+    second_min, second_max = extent(second)
+    return max(first_min - second_max, second_min - first_max, 0)
+
+
+def _cluster_gap(first: Cluster, second: Cluster) -> float:
+    return _bounds_gap(first.bounds, second.bounds)
+
+
+def _point(
+    tile: TileBox, frame: TableFrame | None
+) -> tuple[float, float]:
+    return frame.map(tile.cx, tile.cy) if frame else (tile.cx, tile.cy)
+
+
+def _tile_scale(tile: TileBox, frame: TableFrame | None) -> float:
+    if frame is None:
+        return tile.size
+    center = frame.map(tile.cx, tile.cy)
+    right = frame.map(tile.cx + tile.width / 2, tile.cy)
+    bottom = frame.map(tile.cx, tile.cy + tile.height / 2)
+    return (
+        2 * hypot(right[0] - center[0], right[1] - center[1])
+        + 2 * hypot(bottom[0] - center[0], bottom[1] - center[1])
+    ) / 2
+
+
+def _invert_3x3(matrix: tuple[float, ...]) -> tuple[float, ...]:
+    a, b, c, d, e, f, g, h, i = matrix
+    determinant = (
+        a * (e * i - f * h)
+        - b * (d * i - f * g)
+        + c * (d * h - e * g)
+    )
+    if abs(determinant) < 1e-8:
+        raise ValueError("table corners produce a singular transform")
+    return tuple(
+        value / determinant
+        for value in (
+            e * i - f * h,
+            c * h - b * i,
+            b * f - c * e,
+            f * g - d * i,
+            a * i - c * g,
+            c * d - a * f,
+            d * h - e * g,
+            b * g - a * h,
+            a * e - b * d,
+        )
     )
 
 
 def _infer_player_direction(
     clusters: list[Cluster],
-    topology: tuple[
-        tuple[float, float],
-        tuple[float, float, float] | None,
-        float,
-    ],
-    max_distance: float,
 ) -> tuple[float, float]:
-    center = topology[0]
-    eligible = [
-        cluster
-        for cluster in clusters
-        if cluster.tile_count >= 2
-        and _table_distance(cluster, topology) >= max_distance / 2
-    ]
+    center = _center(clusters)
     candidate = max(
-        eligible or clusters,
-        key=lambda cluster: cluster.scale * _table_distance(cluster, topology),
+        clusters,
+        key=lambda cluster: cluster.tile_count * cluster.scale,
     )
     direction = (
         candidate.centroid[0] - center[0],
@@ -550,54 +865,3 @@ def _bounds_gap(
     horizontal = max(first[0] - second[2], second[0] - first[2], 0)
     vertical = max(first[1] - second[3], second[1] - first[3], 0)
     return hypot(horizontal, vertical)
-
-
-def _wall_topology(
-    walls: list[Cluster],
-) -> tuple[
-    tuple[float, float],
-    tuple[float, float, float] | None,
-    float,
-] | None:
-    if len(walls) < 2:
-        return None
-    center = (
-        median(wall.centroid[0] for wall in walls),
-        median(wall.centroid[1] for wall in walls),
-    )
-    if len(walls) < 3:
-        radius = median(
-            hypot(wall.centroid[0] - center[0], wall.centroid[1] - center[1])
-            for wall in walls
-        )
-        return center, None, radius
-    dx = [wall.centroid[0] - center[0] for wall in walls]
-    dy = [wall.centroid[1] - center[1] for wall in walls]
-    floor = median(wall.scale for wall in walls) ** 2
-    xx = fsum(value * value for value in dx) / len(walls) + floor
-    yy = fsum(value * value for value in dy) / len(walls) + floor
-    xy = fsum(x * y for x, y in zip(dx, dy, strict=True)) / len(walls)
-    determinant = xx * yy - xy * xy
-    if determinant <= 0:
-        return None
-    inverse = (yy / determinant, -xy / determinant, xx / determinant)
-    topology = (center, inverse, 0.0)
-    radius = median(_table_distance(wall, topology) for wall in walls)
-    return center, inverse, radius
-
-
-def _table_distance(
-    cluster: Cluster,
-    topology: tuple[
-        tuple[float, float],
-        tuple[float, float, float] | None,
-        float,
-    ],
-) -> float:
-    center, inverse, _ = topology
-    dx = cluster.centroid[0] - center[0]
-    dy = cluster.centroid[1] - center[1]
-    if inverse is None:
-        return hypot(dx, dy)
-    xx, xy, yy = inverse
-    return max(0.0, xx * dx * dx + 2 * xy * dx * dy + yy * dy * dy) ** 0.5

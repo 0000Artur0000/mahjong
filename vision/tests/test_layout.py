@@ -1,6 +1,15 @@
 import unittest
 
-from dorahub_vision.layout import LayoutParams, TileBox, cluster_layout
+import cv2
+import numpy as np
+
+from dorahub_vision.layout import (
+    LayoutParams,
+    TableFrame,
+    TileBox,
+    cluster_layout,
+)
+from vision.scripts.table_plane import estimate_table_corners
 
 
 def row(y: float, x: float, count: int) -> list[TileBox]:
@@ -26,6 +35,22 @@ def grid(
 
 
 class LayoutTest(unittest.TestCase):
+    def test_estimates_and_rectifies_table_plane(self) -> None:
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        polygon = np.array([[25, 35], [180, 20], [195, 190], [5, 175]])
+        cv2.fillConvexPoly(image, polygon, (190, 190, 190))
+
+        corners = estimate_table_corners(image)
+        frame = TableFrame(corners)
+
+        for actual, expected in zip(
+            (frame.map(*point) for point in corners),
+            ((0, 0), (1, 0), (1, 1), (0, 1)),
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual[0], expected[0], places=6)
+            self.assertAlmostEqual(actual[1], expected[1], places=6)
+
     def test_clusters_hand_and_keeps_ambiguous_group_unassigned(self) -> None:
         result = cluster_layout(row(0.85, 0.10, 13) + row(0.25, 0.55, 5))
 
@@ -145,6 +170,60 @@ class LayoutTest(unittest.TestCase):
 
         self.assertIsNone(result.dead_wall)
         self.assertFalse(result.walls)
+
+    def test_grows_micro_zones_in_table_coordinates(self) -> None:
+        own = [
+            TileBox(
+                0.16 + index * 0.045,
+                0.84,
+                0.035,
+                0.055,
+                face_score=1.0,
+            )
+            for index in range(14)
+        ]
+        opponent = [
+            TileBox(
+                x,
+                0.08,
+                0.025,
+                0.04,
+                face_score=0.0,
+            )
+            for x in (0.62, 0.65, 0.68, 0.71, 0.79, 0.82, 0.85)
+        ]
+        discards = [
+            TileBox(
+                tile.cx,
+                tile.cy,
+                tile.width,
+                tile.height,
+                face_score=1.0,
+            )
+            for tile in grid(
+                0.42,
+                0.40,
+                6,
+                2,
+                width=0.025,
+                height=0.04,
+                step_x=0.03,
+                step_y=0.045,
+            )
+        ]
+
+        result = cluster_layout(
+            own + opponent + discards,
+            LayoutParams(
+                player_direction=(0, 1),
+                table_corners=((0, 0), (1, 0), (1, 1), (0, 1)),
+            ),
+        )
+
+        self.assertEqual(result.hand.tile_count, 14)
+        self.assertEqual(result.opponent_hands[0].tile_count, 7)
+        self.assertEqual(result.opponent_hands[0].seat, "opposite")
+        self.assertEqual(sum(group.tile_count for group in result.discards), 12)
 
     def test_hand_selection_is_not_tied_to_bottom_of_image(self) -> None:
         result = cluster_layout(

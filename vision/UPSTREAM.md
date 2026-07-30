@@ -64,7 +64,11 @@ riichi-проекты группируют уже известное игров�
 Generic rectangles недостаточно, чтобы отличить руку, сброс и стену одинаковой
 геометрии. Поэтому semantic grouping объединяет локальную scale-normalized
 геометрию, face/back evidence существующего LiteRT и направление игрока из
-capture protocol; без evidence неоднозначная группа остаётся `other`.
+capture protocol. Перед grouping видимая плоскость стола автоматически
+выделяется по dominant surface color и homography переводит detections в
+канонический вид сверху; фото-координаты используются только для отрисовки.
+Микро-зоны растут от уверенных hand/wall/dora/discard seeds, а proposals вне
+плоскости или spatial support попадают в `noise`.
 Официальный
 [`Ultralytics/SAHI` guide](https://github.com/ultralytics/ultralytics/blob/main/docs/en/guides/sahi-tiled-inference.md)
 полезен для sliced detection и box merging, но не определяет hand/dead
