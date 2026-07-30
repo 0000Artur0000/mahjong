@@ -68,7 +68,10 @@ capture protocol. Перед grouping видимая плоскость стол
 выделяется по dominant surface color и homography переводит detections в
 канонический вид сверху; фото-координаты используются только для отрисовки.
 Микро-зоны растут от уверенных hand/wall/dora/discard seeds, а proposals вне
-плоскости или spatial support попадают в `noise`.
+плоскости или spatial support попадают в `noise`. Индикатор доры отделяется
+от спинок мёртвой стены; для маленькой стены доступен резервный contrast score.
+Обратная homography рисует зоны перспективными полигонами, а `noise` в
+итоговый overlay не выводится.
 Официальный
 [`Ultralytics/SAHI` guide](https://github.com/ultralytics/ultralytics/blob/main/docs/en/guides/sahi-tiled-inference.md)
 полезен для sliced detection и box merging, но не определяет hand/dead

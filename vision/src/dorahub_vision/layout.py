@@ -18,6 +18,7 @@ class TableFrame:
         tuple[float, float],
     ]
     _matrix: tuple[float, ...] = field(init=False, repr=False)
+    _inverse_matrix: tuple[float, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -70,10 +71,20 @@ class TableFrame:
             h,
             1.0,
         )
+        object.__setattr__(self, "_inverse_matrix", square_to_image)
         object.__setattr__(self, "_matrix", _invert_3x3(square_to_image))
 
     def map(self, x: float, y: float) -> tuple[float, float]:
         a, b, c, d, e, f, g, h, i = self._matrix
+        scale = g * x + h * y + i
+        if abs(scale) < 1e-8:
+            raise ValueError("point lies on the table horizon")
+        return (a * x + b * y + c) / scale, (
+            d * x + e * y + f
+        ) / scale
+
+    def unmap(self, x: float, y: float) -> tuple[float, float]:
+        a, b, c, d, e, f, g, h, i = self._inverse_matrix
         scale = g * x + h * y + i
         if abs(scale) < 1e-8:
             raise ValueError("point lies on the table horizon")
@@ -650,7 +661,56 @@ def _assign_roles(
                 )
             else:
                 cluster.role = "noise"
+    if dead_wall is not None:
+        _, dead_wall = _split_dead_wall_dora(
+            clusters, dead_wall, params, frame
+        )
     return hand, dead_wall
+
+
+def _split_dead_wall_dora(
+    clusters: list[Cluster],
+    dead_wall: Cluster,
+    params: LayoutParams,
+    frame: TableFrame | None,
+) -> tuple[Cluster | None, Cluster]:
+    faces = tuple(
+        tile
+        for tile in dead_wall.tiles
+        if tile.face_score is not None
+        and tile.face_score >= params.face_threshold
+    )
+    backs = tuple(tile for tile in dead_wall.tiles if tile not in faces)
+    if not faces or len(backs) < 2:
+        return None, dead_wall
+    back_wall = _describe(backs, frame)
+    dora_tiles = tuple(
+        tile
+        for tile in faces
+        if _axis_distance(_point(tile, frame), back_wall)
+        <= 0.7 * back_wall.scale
+    )
+    if not dora_tiles:
+        return None, dead_wall
+    dora = _describe(dora_tiles, frame)
+    dora.role = "dora"
+    back_wall.role = "dead_wall"
+    back_wall.heuristic_score = dead_wall.heuristic_score
+    leftovers = tuple(tile for tile in faces if tile not in dora_tiles)
+    clusters[:] = [
+        back_wall if cluster is dead_wall else cluster
+        for cluster in clusters
+    ]
+    clusters.append(dora)
+    if leftovers:
+        clusters.append(_describe(leftovers, frame))
+    return dora, back_wall
+
+
+def _axis_distance(point: tuple[float, float], cluster: Cluster) -> float:
+    x = point[0] - cluster.centroid[0]
+    y = point[1] - cluster.centroid[1]
+    return abs(cluster.axis[0] * y - cluster.axis[1] * x)
 
 
 def _components(

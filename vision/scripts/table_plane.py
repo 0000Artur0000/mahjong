@@ -7,6 +7,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from dorahub_vision.layout import TileBox
+
 
 def estimate_table_corners(
     image: np.ndarray,
@@ -67,6 +69,28 @@ def estimate_table_corners(
         )
         for x, y in ordered
     )
+
+
+def appearance_face_score(image: np.ndarray, tile: TileBox) -> float:
+    """Fallback for tiny face-up tiles missed by the face classifier."""
+
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("expected a BGR image")
+    height, width = image.shape[:2]
+    left = round((tile.cx - tile.width * 0.3) * width)
+    right = round((tile.cx + tile.width * 0.3) * width)
+    top = round((tile.cy - tile.height * 0.3) * height)
+    bottom = round((tile.cy + tile.height * 0.3) * height)
+    patch = cv2.cvtColor(
+        image[
+            max(0, top) : min(height, bottom),
+            max(0, left) : min(width, right),
+        ],
+        cv2.COLOR_BGR2GRAY,
+    )
+    if patch.size < 16:
+        return 0.0
+    return min(1.0, max(0.0, (float(patch.std()) - 45) / 10))
 
 
 def main() -> None:

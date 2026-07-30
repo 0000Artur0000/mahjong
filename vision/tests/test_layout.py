@@ -9,7 +9,10 @@ from dorahub_vision.layout import (
     TileBox,
     cluster_layout,
 )
-from vision.scripts.table_plane import estimate_table_corners
+from vision.scripts.table_plane import (
+    appearance_face_score,
+    estimate_table_corners,
+)
 
 
 def row(y: float, x: float, count: int) -> list[TileBox]:
@@ -50,6 +53,27 @@ class LayoutTest(unittest.TestCase):
         ):
             self.assertAlmostEqual(actual[0], expected[0], places=6)
             self.assertAlmostEqual(actual[1], expected[1], places=6)
+        for actual, expected in zip(
+            (frame.unmap(*point) for point in ((0, 0), (1, 0), (1, 1), (0, 1))),
+            corners,
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual[0], expected[0], places=6)
+            self.assertAlmostEqual(actual[1], expected[1], places=6)
+
+        face = np.full((80, 80, 3), 180, dtype=np.uint8)
+        face[30:50, 30:50] = 20
+        self.assertGreater(
+            appearance_face_score(face, TileBox(0.5, 0.5, 0.5, 0.5)),
+            0.5,
+        )
+        self.assertEqual(
+            appearance_face_score(
+                np.full((80, 80, 3), 180, dtype=np.uint8),
+                TileBox(0.5, 0.5, 0.5, 0.5),
+            ),
+            0,
+        )
 
     def test_clusters_hand_and_keeps_ambiguous_group_unassigned(self) -> None:
         result = cluster_layout(row(0.85, 0.10, 13) + row(0.25, 0.55, 5))
@@ -137,7 +161,8 @@ class LayoutTest(unittest.TestCase):
         )
 
         self.assertEqual(result.hand.tile_count, 14)
-        self.assertEqual(result.dead_wall.tile_count, 10)
+        self.assertEqual(result.dead_wall.tile_count, 9)
+        self.assertEqual(result.dora[0].tile_count, 1)
         self.assertEqual([cluster.tile_count for cluster in result.discards], [12])
         self.assertEqual(result.discards[0].tiles, tuple(discards))
 
