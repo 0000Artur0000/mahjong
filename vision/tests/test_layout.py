@@ -342,16 +342,22 @@ class LayoutTest(unittest.TestCase):
             TileBox(0.08, y, 0.022, 0.035, face_score=1)
             for y in (0.25, 0.275, 0.30, 0.34, 0.365, 0.39)
         ]
+        calls = [
+            TileBox(x, y, 0.022, 0.035, face_score=1)
+            for y in (0.27, 0.37)
+            for x in (0.15, 0.175)
+        ]
+        missed_pair = [TileBox(0.08, 0.46, 0.022, 0.035, face_score=0)]
 
         result = cluster_layout(
-            own + wall + discard + open_melds,
+            own + wall + discard + open_melds + calls + missed_pair,
             LayoutParams(
                 player_direction=(0, 1),
                 table_corners=((0, 0), (1, 0), (1, 1), (0, 1)),
             ),
         )
 
-        self.assertIn(6, [group.tile_count for group in result.opponent_hands])
+        self.assertIn(11, [group.tile_count for group in result.opponent_hands])
         self.assertIn(9, [group.tile_count for group in result.discards])
 
     def test_hand_selection_is_not_tied_to_bottom_of_image(self) -> None:

@@ -678,6 +678,11 @@ def _assign_roles(
                 seat=seat,
             )
 
+    if dead_wall is not None:
+        _, dead_wall = _split_dead_wall_dora(
+            clusters, dead_wall, params, frame
+        )
+
     _promote_edge_hands(
         clusters,
         params,
@@ -729,10 +734,6 @@ def _assign_roles(
                 )
             else:
                 cluster.role = "noise"
-    if dead_wall is not None:
-        _, dead_wall = _split_dead_wall_dora(
-            clusters, dead_wall, params, frame
-        )
     return hand, dead_wall
 
 
@@ -755,6 +756,40 @@ def _promote_edge_hands(
         ):
             cluster.role = "opponent_hand"
             cluster.seat = _seat(cluster.centroid, center, directions)
+
+    for hand in tuple(
+        cluster for cluster in clusters if cluster.role == "opponent_hand"
+    ):
+        parts = [
+            hand,
+            *(
+                cluster
+                for cluster in clusters
+                if cluster.role == "other"
+                and 1 <= cluster.tile_count <= 4
+                and (
+                    cluster.tile_count == 1
+                    or _face_count(cluster, params.face_threshold) > 0
+                )
+                and _cluster_gap(hand, cluster)
+                <= (
+                    2.5 if cluster.tile_count == 1 else params.hand_merge_gap_k
+                )
+                * max(hand.scale, cluster.scale)
+            ),
+        ]
+        if (
+            len(parts) > 1
+            and sum(part.tile_count for part in parts)
+            <= params.hand_max_tiles
+        ):
+            _replace(
+                clusters,
+                parts,
+                "opponent_hand",
+                frame=frame,
+                seat=hand.seat,
+            )
 
     by_edge: dict[str, list[Cluster]] = {
         "left": [],
