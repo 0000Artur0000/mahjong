@@ -5,6 +5,7 @@ from math import atan2, cos, fsum, hypot, isfinite, sin
 from statistics import median, pstdev
 
 MAX_TILES = 256
+MAX_DISCARD_ROW_TILES = 6
 
 
 @dataclass(frozen=True)
@@ -623,18 +624,8 @@ def _assign_roles(
                 merged.centroid[1],
                 1 - merged.centroid[0],
             ) <= 0.15
-            near_wall = any(
-                _cluster_gap(merged, wall)
-                <= 2 * max(merged.scale, wall.scale)
-                for wall in inner_walls
-            )
             visible_seed = visible and (
                 (
-                    near_wall
-                    and merged.tile_count >= 7
-                    and merged.linearity >= 0.95
-                )
-                or (
                     edge_seed
                     and (
                         merged.tile_count <= 4
@@ -692,6 +683,7 @@ def _assign_roles(
         params,
         directions,
         frame,
+        center,
     )
 
     discard_candidates = [
@@ -749,23 +741,20 @@ def _promote_edge_hands(
     params: LayoutParams,
     directions: dict[str, tuple[float, float]],
     frame: TableFrame | None,
+    center: tuple[float, float],
 ) -> None:
     live_walls = [cluster for cluster in clusters if cluster.role == "wall"]
     for cluster in clusters:
         if (
             cluster.role == "other"
-            and 7 <= cluster.tile_count <= params.hand_max_tiles
-            and cluster.linearity >= 0.95
+            and MAX_DISCARD_ROW_TILES
+            <= cluster.tile_count
+            <= params.hand_max_tiles
             and _face_count(cluster, params.face_threshold) > 0
-            and _opponent_edge(cluster.centroid)[1] > 0.15
-            and any(
-                _cluster_gap(cluster, wall)
-                <= 3 * max(cluster.scale, wall.scale)
-                for wall in live_walls
-            )
+            and _open_meld_sizes(cluster, frame)
         ):
             cluster.role = "opponent_hand"
-            cluster.seat, _ = _opponent_edge(cluster.centroid)
+            cluster.seat = _seat(cluster.centroid, center, directions)
 
     by_edge: dict[str, list[Cluster]] = {
         "left": [],
@@ -833,6 +822,33 @@ def _promote_edge_hands(
                     frame=frame,
                     seat=seat,
                 )
+
+
+def _open_meld_sizes(
+    cluster: Cluster,
+    frame: TableFrame | None,
+) -> tuple[int, ...]:
+    projections = sorted(
+        _projection(_point(tile, frame), cluster.axis)
+        for tile in cluster.tiles
+    )
+    gaps = [
+        current - previous
+        for previous, current in zip(projections, projections[1:])
+    ]
+    if not gaps:
+        return ()
+    typical_gap = median(gaps)
+    cuts = [
+        index
+        for index, gap in enumerate(gaps, start=1)
+        if gap > 1.5 * typical_gap
+    ]
+    sizes = tuple(
+        end - start
+        for start, end in zip((0, *cuts), (*cuts, len(projections)), strict=True)
+    )
+    return sizes if len(sizes) >= 2 and all(3 <= size <= 4 for size in sizes) else ()
 
 
 def _opponent_edge(point: tuple[float, float]) -> tuple[str, float]:

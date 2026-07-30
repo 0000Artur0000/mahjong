@@ -278,13 +278,23 @@ class LayoutTest(unittest.TestCase):
         ]
         open_hand = [
             TileBox(
-                0.38 + index * 0.028,
+                x,
                 0.18,
                 0.025,
                 0.04,
                 face_score=1,
             )
-            for index in range(9)
+            for x in (
+                0.38,
+                0.408,
+                0.436,
+                0.481,
+                0.509,
+                0.537,
+                0.582,
+                0.610,
+                0.638,
+            )
         ]
         paper = [
             TileBox(0.03 + index * 0.035, 0.5, 0.025, 0.04, face_score=1)
@@ -314,6 +324,35 @@ class LayoutTest(unittest.TestCase):
         )
         self.assertIn(15, [group.tile_count for group in result.walls])
         self.assertEqual([group.tile_count for group in result.noise], [2])
+
+    def test_separates_open_melds_from_a_nine_tile_discard_row(self) -> None:
+        own = [
+            TileBox(0.20 + index * 0.035, 0.88, 0.025, 0.04, face_score=1)
+            for index in range(14)
+        ]
+        wall = [
+            TileBox(0.25 + index * 0.025, 0.57, 0.022, 0.018, face_score=0)
+            for index in range(16)
+        ]
+        discard = [
+            TileBox(0.30 + index * 0.025, 0.50, 0.022, 0.035, face_score=1)
+            for index in range(9)
+        ]
+        open_melds = [
+            TileBox(0.08, y, 0.022, 0.035, face_score=1)
+            for y in (0.25, 0.275, 0.30, 0.34, 0.365, 0.39)
+        ]
+
+        result = cluster_layout(
+            own + wall + discard + open_melds,
+            LayoutParams(
+                player_direction=(0, 1),
+                table_corners=((0, 0), (1, 0), (1, 1), (0, 1)),
+            ),
+        )
+
+        self.assertIn(6, [group.tile_count for group in result.opponent_hands])
+        self.assertIn(9, [group.tile_count for group in result.discards])
 
     def test_hand_selection_is_not_tied_to_bottom_of_image(self) -> None:
         result = cluster_layout(
