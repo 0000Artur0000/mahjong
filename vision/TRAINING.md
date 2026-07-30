@@ -24,7 +24,7 @@ PYTHONPATH=vision/src python3 vision/scripts/riichi_synthetic.py check \
   /tmp/dorahub-riichi-synthetic
 ```
 
-Do not commit generated images, private acceptance photos, or model weights.
+Do not commit generated images, private photos, labels, or model weights.
 
 ## Single-class COCO import
 
@@ -49,11 +49,29 @@ layout baseline and fine-tuned YOLO26n for three epochs at 640 px with
 improved precision/recall/mAP50 from `0.633/0.546/0.592` to
 `0.861/0.861/0.907`.
 
-The artifact is not a product replacement: on the five frozen club photos it
-returned `25/20/24/17/24` boxes, missed wall tiles and falsely detected the
-round score counters. More epochs on the same domain cannot supply those
-missing hard negatives. Label separate full-table club scenes containing
-walls, counters, racks and paper before the next fine-tune.
+That artifact was rejected: on the five club photos it returned
+`25/20/24/17/24` boxes, missed wall tiles and falsely detected round score
+counters.
+
+With explicit user approval, those five photos were then converted from frozen
+acceptance into domain-training data: 418 generic tile boxes, including walls
+and stacks. Twelve overlapping runtime-shaped crops produced 240 training
+images after repetition. The full train pool contained 2,098 images; the
+separate COCO+Haitaks validation retained 477 images and 4,283 instances.
+
+The first two-epoch YOLO26n fine-tune at 640 px reached validation
+`P/R/mAP50/mAP50-95 = 0.886/0.859/0.923/0.612`. Two short hard-negative passes
+then used 18 unique crops containing paper, counters, dice, racks and people.
+The selected local candidate reached `0.890/0.846/0.915/0.551` on the separate
+validation. Its SHA-256 is
+`124809c93ec8850666c58424c289cdd5e76e152fdc1885c618544e5ba21a8abf`.
+
+At the local working threshold `0.15`, the candidate returned
+`89/61/88/88/87` boxes and scored `325 TP / 88 FP / 93 FN`
+(`P/R/F1 = 0.787/0.778/0.782`) against the five domain labels. Round counters
+are rejected; some paper/dice false positives and missed wall segments remain.
+The artifact and private data stay outside Git. It is not a product release,
+and the five training photos are no longer an unbiased acceptance set.
 
 ## Latest local smoke
 
@@ -124,12 +142,11 @@ The review draft is loaded into pinned CVAT `v2.51.0` at
 37 labels and 7,126 rectangles. Local credentials, source images, annotations
 and CVAT volumes stay outside Git.
 
-The frozen five-photo acceptance set is separate at
-`http://localhost:8080/tasks/2`: 5 frames, 1 job and 37 labels. The current
-strict hand-only pass rejects two sparse scenes and proposes 36 rectangles on
-the other three. Correct these proposals before measuring exact-hand accuracy;
-never use this task for training, threshold tuning or model selection.
+The original five-photo review set is at
+`http://localhost:8080/tasks/2`: 5 frames, 1 job and 37 labels. It has since
+been converted to domain-training data and must not be reported as independent
+acceptance. Collect a new session-separated set before release measurement.
 
 Full-field generic localization is separate at `http://localhost:8080/tasks/3`:
-5 frames, 1 label (`tile`) and 194 proposals. It is a high-recall review task,
-not ground truth.
+5 frames and 1 label (`tile`). Its original 194 proposals were superseded by
+418 reviewed generic boxes used for local fine-tuning.
