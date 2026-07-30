@@ -111,6 +111,19 @@ PYTHONPATH=vision/src python3 vision/scripts/riichi_litert.py \
 single label `tile`. It detects readable faces; backs, walls and stacked tiles
 still require single-class real-photo labels and fine-tuning.
 
+Group saved full-field and face predictions through the same table-space path
+used by review overlays:
+
+```bash
+PYTHONPATH=vision/src:. python3 vision/scripts/layout_preview.py \
+  /path/to/full-field/predictions.json /path/to/face-predictions.json \
+  /path/to/images /path/to/output
+```
+
+The command estimates the table plane, applies face fallback only inside wall
+zones, groups every accepted tile and writes fresh perspective overlays plus
+`groups.json`. `noise` and unresolved groups are intentionally not drawn.
+
 ## Real-photo review gate
 
 Create a review-only YOLO draft from the audited Kaggle v1 source and LiteRT
