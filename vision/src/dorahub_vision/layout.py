@@ -14,6 +14,7 @@ class TileBox:
     width: float
     height: float
     class_id: int | None = None
+    face_score: float | None = None
 
     def __post_init__(self) -> None:
         values = (self.cx, self.cy, self.width, self.height)
@@ -30,6 +31,14 @@ class TileBox:
             or (
                 self.class_id is not None
                 and (not isinstance(self.class_id, int) or self.class_id < 0)
+            )
+            or (
+                self.face_score is not None
+                and (
+                    isinstance(self.face_score, bool)
+                    or not isfinite(self.face_score)
+                    or not 0 <= self.face_score <= 1
+                )
             )
         ):
             raise ValueError("tile box must fit normalized [0, 1] coordinates")
@@ -54,7 +63,8 @@ class LayoutParams:
     discard_min_tiles: int = 2
     dead_wall_min_tiles: int = 4
     dead_wall_max_tiles: int = 14
-    wall_aspect: float = 1.6
+    face_threshold: float = 0.1
+    player_direction: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -63,7 +73,7 @@ class LayoutParams:
                 for value in (
                     self.eps_k,
                     self.hand_merge_gap_k,
-                    self.wall_aspect,
+                    self.face_threshold,
                 )
             )
             or self.eps_k <= 0
@@ -73,7 +83,15 @@ class LayoutParams:
             or self.hand_merge_gap_k <= 0
             or self.discard_min_tiles < 1
             or not 1 <= self.dead_wall_min_tiles <= self.dead_wall_max_tiles
-            or self.wall_aspect <= 1
+            or not 0 <= self.face_threshold <= 1
+            or (
+                self.player_direction is not None
+                and (
+                    len(self.player_direction) != 2
+                    or not all(isfinite(value) for value in self.player_direction)
+                    or self.player_direction == (0, 0)
+                )
+            )
         ):
             raise ValueError("invalid layout parameters")
 
@@ -286,30 +304,91 @@ def _order_tiles(
 def _assign_roles(
     clusters: list[Cluster], params: LayoutParams
 ) -> tuple[Cluster | None, Cluster | None]:
-    scene_scale = median(cluster.scale for cluster in clusters)
+    walls = [
+        cluster
+        for cluster in clusters
+        if cluster.tile_count >= params.dead_wall_min_tiles
+        and cluster.rows <= 2
+        and cluster.linearity >= 0.6
+        and _back_fraction(cluster, params.face_threshold) > 0.5
+    ]
+    for wall in walls:
+        wall.role, wall.heuristic_score = "wall", _back_fraction(
+            wall, params.face_threshold
+        )
+
+    topology = _wall_topology(walls) or (
+        (
+            median(cluster.centroid[0] for cluster in clusters),
+            median(cluster.centroid[1] for cluster in clusters),
+        ),
+        None,
+        0.0,
+    )
+    available = [cluster for cluster in clusters if cluster.role == "other"]
+    max_distance = max(
+        (_table_distance(cluster, topology) for cluster in available),
+        default=1.0,
+    )
+    max_scale = max((cluster.scale for cluster in available), default=1.0)
+    direction = params.player_direction or (
+        _infer_player_direction(available, topology, max_distance)
+        if available
+        else (0.0, 1.0)
+    )
     candidates = [
         (score, cluster)
-        for cluster in clusters
-        if (score := _hand_score(cluster, scene_scale, params)) is not None
+        for cluster in available
+        if (
+            score := _hand_score(
+                cluster,
+                direction,
+                topology,
+                max_distance,
+                max_scale,
+                params,
+            )
+        )
+        is not None
     ]
     hand = None
     if candidates:
         score, hand = max(candidates, key=lambda item: item[0])
         parts = [hand]
         merged = hand
+        remaining = sorted(
+            [
+                cluster
+                for cluster in available
+                if cluster is not hand
+                and (
+                    not any(tile.face_score is not None for tile in cluster.tiles)
+                    or _face_count(cluster, params.face_threshold) > 0
+                )
+            ],
+            key=lambda cluster: _bounds_gap(hand.bounds, cluster.bounds),
+        )
         while True:
             companion = next(
                 (
                     cluster
-                    for cluster in clusters
-                    if cluster not in parts
-                    and _is_hand_companion(merged, cluster, params)
+                    for cluster in remaining
+                    if sum(item.tile_count for item in parts) + cluster.tile_count
+                    <= params.hand_max_tiles
+                    and _is_hand_companion(
+                        merged,
+                        cluster,
+                        direction,
+                        topology[0],
+                        params,
+                    )
                 ),
                 None,
             )
             if companion is None:
                 break
             parts.append(companion)
+            remaining.remove(companion)
             merged = _describe(
                 tuple(tile for cluster in parts for tile in cluster.tiles)
             )
@@ -320,65 +399,148 @@ def _assign_roles(
         ]
         hand = merged
 
-    wall_candidates = [
-        (score, cluster)
-        for cluster in clusters
-        if cluster is not hand
-        and (score := _dead_wall_score(cluster, params)) is not None
-    ]
-    dead_wall = None
-    if wall_candidates:
-        score, dead_wall = max(wall_candidates, key=lambda item: item[0])
-        dead_wall.role, dead_wall.heuristic_score = "dead_wall", score
+    dead_wall = next(
+        (
+            cluster
+            for cluster in sorted(
+                walls,
+                key=lambda item: sum(
+                    tile.face_score or 0 for tile in item.tiles
+                ),
+                reverse=True,
+            )
+            if cluster.tile_count <= params.dead_wall_max_tiles
+            and 1
+            <= _face_count(cluster, params.face_threshold)
+            <= 5
+        ),
+        None,
+    )
+    if dead_wall is not None:
+        dead_wall.role = "dead_wall"
 
     for cluster in clusters:
         if cluster.role != "other":
             continue
-        if cluster.tile_count >= params.discard_min_tiles:
+        if (
+            topology[2] > 0
+            and _table_distance(cluster, topology) < topology[2]
+            and cluster.tile_count >= params.discard_min_tiles
+            and _face_count(cluster, params.face_threshold) > 0
+        ):
             cluster.role, cluster.heuristic_score = "discard", cluster.regularity
     return hand, dead_wall
 
 
 def _hand_score(
-    cluster: Cluster, scene_scale: float, params: LayoutParams
+    cluster: Cluster,
+    direction: tuple[float, float],
+    topology: tuple[
+        tuple[float, float],
+        tuple[float, float, float] | None,
+        float,
+    ],
+    max_distance: float,
+    max_scale: float,
+    params: LayoutParams,
 ) -> float | None:
     if (
         cluster.tile_count < params.hand_min_tiles
         or cluster.rows > params.hand_max_rows
     ):
         return None
-    edge = 1 - 2 * _edge_distance(cluster)
+    center = topology[0]
+    dx = cluster.centroid[0] - center[0]
+    dy = cluster.centroid[1] - center[1]
+    radius = hypot(dx, dy)
+    direction_size = hypot(*direction)
+    if radius == 0:
+        if max_distance:
+            return None
+        side = radial = 1.0
+    else:
+        side = (dx * direction[0] + dy * direction[1]) / (
+            radius * direction_size
+        )
+        radial = _table_distance(cluster, topology) / max_distance
+    distance = _table_distance(cluster, topology)
+    if side <= 0 or (topology[2] > 0 and distance < topology[2]):
+        return None
     count = min(1.0, cluster.tile_count / 13)
-    relative_scale = cluster.scale / (cluster.scale + scene_scale)
-    shape = (cluster.regularity + cluster.linearity) / 2
+    relative_scale = cluster.scale / max_scale
     overflow = max(0, cluster.tile_count - params.hand_max_tiles) / params.hand_max_tiles
     return (
-        0.35 * count
-        + 0.25 * relative_scale
-        + 0.25 * edge
-        + 0.15 * shape
+        0.4 * side
+        + 0.3 * radial
+        + 0.2 * relative_scale
+        + 0.1 * count
         - 0.25 * overflow
     )
 
 
 def _is_hand_companion(
-    hand: Cluster, candidate: Cluster, params: LayoutParams
+    hand: Cluster,
+    candidate: Cluster,
+    direction: tuple[float, float],
+    center: tuple[float, float],
+    params: LayoutParams,
 ) -> bool:
     if hand.tile_count + candidate.tile_count > params.hand_max_tiles:
         return False
     sizes = hand.scale / candidate.scale
+    dx = candidate.centroid[0] - center[0]
+    dy = candidate.centroid[1] - center[1]
     return (
         0.5 <= sizes <= 2
+        and dx * direction[0] + dy * direction[1] > 0
         and _bounds_gap(hand.bounds, candidate.bounds)
-        <= params.hand_merge_gap_k * max(hand.scale, candidate.scale)
-        and abs(_edge_distance(hand) - _edge_distance(candidate))
         <= params.hand_merge_gap_k * max(hand.scale, candidate.scale)
     )
 
 
-def _edge_distance(cluster: Cluster) -> float:
-    left, top, right, bottom = cluster.bounds
-    return min(left, top, 1 - right, 1 - bottom)
+def _infer_player_direction(
+    clusters: list[Cluster],
+    topology: tuple[
+        tuple[float, float],
+        tuple[float, float, float] | None,
+        float,
+    ],
+    max_distance: float,
+) -> tuple[float, float]:
+    center = topology[0]
+    eligible = [
+        cluster
+        for cluster in clusters
+        if cluster.tile_count >= 2
+        and _table_distance(cluster, topology) >= max_distance / 2
+    ]
+    candidate = max(
+        eligible or clusters,
+        key=lambda cluster: cluster.scale * _table_distance(cluster, topology),
+    )
+    direction = (
+        candidate.centroid[0] - center[0],
+        candidate.centroid[1] - center[1],
+    )
+    return direction if hypot(*direction) else (0.0, 1.0)
+
+
+def _face_count(cluster: Cluster, threshold: float) -> int:
+    return sum(
+        tile.face_score is not None and tile.face_score >= threshold
+        for tile in cluster.tiles
+    )
+
+
+def _back_fraction(cluster: Cluster, threshold: float) -> float:
+    observed = [
+        tile.face_score for tile in cluster.tiles if tile.face_score is not None
+    ]
+    return (
+        sum(score < threshold for score in observed) / len(observed)
+        if observed
+        else 0.0
+    )
 
 
 def _bounds_gap(
@@ -390,21 +552,52 @@ def _bounds_gap(
     return hypot(horizontal, vertical)
 
 
-def _dead_wall_score(
-    cluster: Cluster, params: LayoutParams
-) -> float | None:
-    if (
-        not params.dead_wall_min_tiles
-        <= cluster.tile_count
-        <= params.dead_wall_max_tiles
-        or cluster.rows > 2
-    ):
+def _wall_topology(
+    walls: list[Cluster],
+) -> tuple[
+    tuple[float, float],
+    tuple[float, float, float] | None,
+    float,
+] | None:
+    if len(walls) < 2:
         return None
-    shape = median(max(tile.aspect, 1 / tile.aspect) for tile in cluster.tiles)
-    if shape < params.wall_aspect:
-        return None
-    return (
-        0.45 * (cluster.rows == 2)
-        + 0.35 * shape / (shape + 1)
-        + 0.20 * cluster.regularity
+    center = (
+        median(wall.centroid[0] for wall in walls),
+        median(wall.centroid[1] for wall in walls),
     )
+    if len(walls) < 3:
+        radius = median(
+            hypot(wall.centroid[0] - center[0], wall.centroid[1] - center[1])
+            for wall in walls
+        )
+        return center, None, radius
+    dx = [wall.centroid[0] - center[0] for wall in walls]
+    dy = [wall.centroid[1] - center[1] for wall in walls]
+    floor = median(wall.scale for wall in walls) ** 2
+    xx = fsum(value * value for value in dx) / len(walls) + floor
+    yy = fsum(value * value for value in dy) / len(walls) + floor
+    xy = fsum(x * y for x, y in zip(dx, dy, strict=True)) / len(walls)
+    determinant = xx * yy - xy * xy
+    if determinant <= 0:
+        return None
+    inverse = (yy / determinant, -xy / determinant, xx / determinant)
+    topology = (center, inverse, 0.0)
+    radius = median(_table_distance(wall, topology) for wall in walls)
+    return center, inverse, radius
+
+
+def _table_distance(
+    cluster: Cluster,
+    topology: tuple[
+        tuple[float, float],
+        tuple[float, float, float] | None,
+        float,
+    ],
+) -> float:
+    center, inverse, _ = topology
+    dx = cluster.centroid[0] - center[0]
+    dy = cluster.centroid[1] - center[1]
+    if inverse is None:
+        return hypot(dx, dy)
+    xx, xy, yy = inverse
+    return max(0.0, xx * dx * dx + 2 * xy * dx * dy + yy * dy * dy) ** 0.5

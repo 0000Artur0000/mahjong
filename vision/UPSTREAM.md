@@ -61,8 +61,11 @@ visualization не копируются. CC BY 4.0 dataset импортиров�
 
 Повторный GitHub-аудит 2026-07-30 не нашёл reusable physical-table grouper:
 riichi-проекты группируют уже известное игровое состояние, а не camera boxes.
-Поэтому semantic grouping реализован локальной scale-normalized геометрией без
-новой зависимости. Официальный
+Generic rectangles недостаточно, чтобы отличить руку, сброс и стену одинаковой
+геометрии. Поэтому semantic grouping объединяет локальную scale-normalized
+геометрию, face/back evidence существующего LiteRT и направление игрока из
+capture protocol; без evidence неоднозначная группа остаётся `other`.
+Официальный
 [`Ultralytics/SAHI` guide](https://github.com/ultralytics/ultralytics/blob/main/docs/en/guides/sahi-tiled-inference.md)
 полезен для sliced detection и box merging, но не определяет hand/dead
 wall/discard; заменять им текущие 12 crops стоит только после benchmark.

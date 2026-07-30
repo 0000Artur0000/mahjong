@@ -1,6 +1,6 @@
 import unittest
 
-from dorahub_vision.layout import TileBox, cluster_layout
+from dorahub_vision.layout import LayoutParams, TileBox, cluster_layout
 
 
 def row(y: float, x: float, count: int) -> list[TileBox]:
@@ -26,14 +26,16 @@ def grid(
 
 
 class LayoutTest(unittest.TestCase):
-    def test_clusters_hand_and_discard_and_rejects_bad_geometry(self) -> None:
+    def test_clusters_hand_and_keeps_ambiguous_group_unassigned(self) -> None:
         result = cluster_layout(row(0.85, 0.10, 13) + row(0.25, 0.55, 5))
 
         self.assertIsNotNone(result.hand)
         self.assertEqual(result.hand.tile_count, 13)
-        self.assertEqual([cluster.tile_count for cluster in result.discards], [5])
+        self.assertEqual([cluster.tile_count for cluster in result.others], [5])
         with self.assertRaises(ValueError):
             TileBox(0.99, 0.5, 0.1, 0.1)
+        with self.assertRaises(ValueError):
+            TileBox(0.5, 0.5, 0.1, 0.1, face_score=True)
 
     def test_groups_hand_melds_discards_and_two_level_dead_wall(self) -> None:
         concealed = [
@@ -54,6 +56,35 @@ class LayoutTest(unittest.TestCase):
             step_x=0.034,
             step_y=0.022,
         )
+        dead_wall = [
+            TileBox(
+                tile.cx,
+                tile.cy,
+                tile.width,
+                tile.height,
+                face_score=1.0 if index == 0 else 0.0,
+            )
+            for index, tile in enumerate(dead_wall)
+        ]
+        live_wall = [
+            TileBox(
+                tile.cx,
+                tile.cy,
+                tile.width,
+                tile.height,
+                face_score=0.0,
+            )
+            for tile in grid(
+                0.65,
+                0.70,
+                5,
+                1,
+                width=0.036,
+                height=0.018,
+                step_x=0.034,
+                step_y=0.022,
+            )
+        ]
         discards = grid(
             0.43,
             0.46,
@@ -64,16 +95,62 @@ class LayoutTest(unittest.TestCase):
             step_x=0.03,
             step_y=0.045,
         )
+        discards = [
+            TileBox(
+                tile.cx,
+                tile.cy,
+                tile.width,
+                tile.height,
+                face_score=1.0,
+            )
+            for tile in discards
+        ]
 
-        result = cluster_layout(concealed + meld + dead_wall + list(reversed(discards)))
+        result = cluster_layout(
+            concealed + meld + dead_wall + live_wall + list(reversed(discards)),
+            LayoutParams(player_direction=(0, 1)),
+        )
 
         self.assertEqual(result.hand.tile_count, 14)
         self.assertEqual(result.dead_wall.tile_count, 10)
         self.assertEqual([cluster.tile_count for cluster in result.discards], [12])
         self.assertEqual(result.discards[0].tiles, tuple(discards))
 
+    def test_does_not_guess_wall_or_dead_wall_without_back_majority(self) -> None:
+        ambiguous = [
+            TileBox(
+                tile.cx,
+                tile.cy,
+                tile.width,
+                tile.height,
+                face_score=1.0 if index < 2 else 0.0,
+            )
+            for index, tile in enumerate(
+                grid(
+                    0.20,
+                    0.30,
+                    4,
+                    1,
+                    width=0.036,
+                    height=0.018,
+                    step_x=0.034,
+                    step_y=0.022,
+                )
+            )
+        ]
+        result = cluster_layout(
+            row(0.85, 0.10, 13) + ambiguous,
+            LayoutParams(player_direction=(0, 1)),
+        )
+
+        self.assertIsNone(result.dead_wall)
+        self.assertFalse(result.walls)
+
     def test_hand_selection_is_not_tied_to_bottom_of_image(self) -> None:
-        result = cluster_layout(row(0.10, 0.10, 13) + row(0.55, 0.55, 5))
+        result = cluster_layout(
+            row(0.10, 0.10, 13) + row(0.55, 0.55, 5),
+            LayoutParams(player_direction=(0, -1)),
+        )
 
         self.assertEqual(result.hand.tile_count, 13)
 
