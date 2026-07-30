@@ -1,7 +1,7 @@
 """Geometry-first layout parser adapted from haitaks/mahjong."""
 
 from dataclasses import dataclass
-from math import fsum, hypot, isfinite
+from math import atan2, cos, fsum, hypot, isfinite, sin
 from statistics import median, pstdev
 
 MAX_TILES = 256
@@ -47,13 +47,14 @@ class TileBox:
 class LayoutParams:
     eps_k: float = 1.5
     min_samples: int = 2
-    hand_y_min: float = 0.40
+    hand_min_tiles: int = 3
     hand_max_tiles: int = 18
     hand_max_rows: int = 3
+    hand_merge_gap_k: float = 6.0
     discard_min_tiles: int = 2
-    wall_aspect: float = 1.5
-    hand_y_weight: float = 0.6
-    hand_regularity_weight: float = 0.4
+    dead_wall_min_tiles: int = 4
+    dead_wall_max_tiles: int = 14
+    wall_aspect: float = 1.6
 
     def __post_init__(self) -> None:
         if (
@@ -61,22 +62,18 @@ class LayoutParams:
                 isfinite(value)
                 for value in (
                     self.eps_k,
-                    self.hand_y_min,
+                    self.hand_merge_gap_k,
                     self.wall_aspect,
-                    self.hand_y_weight,
-                    self.hand_regularity_weight,
                 )
             )
             or self.eps_k <= 0
             or not 1 <= self.min_samples <= MAX_TILES
-            or not 0 <= self.hand_y_min < 1
-            or self.hand_max_tiles < 1
+            or not 1 <= self.hand_min_tiles <= self.hand_max_tiles
             or self.hand_max_rows < 1
+            or self.hand_merge_gap_k <= 0
             or self.discard_min_tiles < 1
-            or self.wall_aspect <= 0
-            or self.hand_y_weight < 0
-            or self.hand_regularity_weight < 0
-            or self.hand_y_weight + self.hand_regularity_weight == 0
+            or not 1 <= self.dead_wall_min_tiles <= self.dead_wall_max_tiles
+            or self.wall_aspect <= 1
         ):
             raise ValueError("invalid layout parameters")
 
@@ -90,6 +87,9 @@ class Cluster:
     columns: int
     regularity: float
     dominant_orientation: str
+    scale: float
+    axis: tuple[float, float]
+    linearity: float
     role: str = "other"
     heuristic_score: float = 0.0
 
@@ -105,6 +105,7 @@ class LayoutResult:
     discards: tuple[Cluster, ...] = ()
     walls: tuple[Cluster, ...] = ()
     others: tuple[Cluster, ...] = ()
+    dead_wall: Cluster | None = None
 
 
 def cluster_layout(
@@ -122,25 +123,29 @@ def cluster_layout(
         raise ValueError("params must be LayoutParams")
     config = params or LayoutParams()
     clusters = _cluster(tiles, config)
-    _assign_roles(clusters, config)
+    hand, dead_wall = _assign_roles(clusters, config)
     return LayoutResult(
         tuple(clusters),
-        next((cluster for cluster in clusters if cluster.role == "hand"), None),
+        hand,
         tuple(cluster for cluster in clusters if cluster.role == "discard"),
-        tuple(cluster for cluster in clusters if cluster.role == "wall"),
+        tuple(
+            cluster
+            for cluster in clusters
+            if cluster.role in {"wall", "dead_wall"}
+        ),
         tuple(cluster for cluster in clusters if cluster.role == "other"),
+        dead_wall,
     )
 
 
 def _cluster(tiles: tuple[TileBox, ...], params: LayoutParams) -> list[Cluster]:
-    scale = median(tile.size for tile in tiles)
-    radius = params.eps_k * scale
     # ponytail: O(n²) is bounded by MAX_TILES; add a spatial index only if profiling requires it.
     neighbors = [
         [
             other
             for other, candidate in enumerate(tiles)
-            if hypot(tile.cx - candidate.cx, tile.cy - candidate.cy) < radius
+            if hypot(tile.cx - candidate.cx, tile.cy - candidate.cy)
+            < params.eps_k * (tile.size + candidate.size) / 2
         ]
         for tile in tiles
     ]
@@ -172,15 +177,18 @@ def _cluster(tiles: tuple[TileBox, ...], params: LayoutParams) -> list[Cluster]:
             groups[label].append(tile)
         else:
             singletons.append([tile])
-    clusters = [_describe(tuple(group), scale) for group in groups + singletons]
+    clusters = [_describe(tuple(group)) for group in groups + singletons]
     return sorted(clusters, key=lambda cluster: cluster.tile_count, reverse=True)
 
 
-def _describe(tiles: tuple[TileBox, ...], scale: float) -> Cluster:
+def _describe(tiles: tuple[TileBox, ...]) -> Cluster:
     xs = [tile.cx for tile in tiles]
     ys = [tile.cy for tile in tiles]
-    horizontal = sum(tile.width >= tile.height for tile in tiles) >= len(tiles) / 2
-    orientation = "horizontal" if horizontal else "vertical"
+    scale = median(tile.size for tile in tiles)
+    axis, linearity = _principal_axis(xs, ys)
+    tiles = _order_tiles(tiles, axis, scale)
+    along = [x * axis[0] + y * axis[1] for x, y in zip(xs, ys, strict=True)]
+    across = [-x * axis[1] + y * axis[0] for x, y in zip(xs, ys, strict=True)]
     return Cluster(
         tiles,
         (fsum(xs) / len(xs), fsum(ys) / len(ys)),
@@ -190,69 +198,213 @@ def _describe(tiles: tuple[TileBox, ...], scale: float) -> Cluster:
             max(tile.cx + tile.width / 2 for tile in tiles),
             max(tile.cy + tile.height / 2 for tile in tiles),
         ),
-        _count_bands(ys, scale),
-        _count_bands(xs, scale),
-        _regularity(tiles, orientation),
-        orientation,
+        _count_bands(across, scale),
+        _count_bands(along, scale),
+        _regularity(along, scale),
+        "horizontal" if abs(axis[0]) >= abs(axis[1]) else "vertical",
+        scale,
+        axis,
+        linearity,
     )
 
 
 def _count_bands(values: list[float], scale: float) -> int:
-    ordered = sorted(values)
-    return 1 + sum(
-        current - previous > 0.6 * scale
-        for previous, current in zip(ordered, ordered[1:])
-    )
+    return len(_bands(values, 0.6 * scale))
 
 
-def _regularity(tiles: tuple[TileBox, ...], orientation: str) -> float:
-    if len(tiles) < 3:
+def _bands(values: list[float], tolerance: float) -> list[list[float]]:
+    bands: list[list[float]] = []
+    for value in sorted(values):
+        if not bands or value - bands[-1][-1] > tolerance:
+            bands.append([value])
+        else:
+            bands[-1].append(value)
+    return bands
+
+
+def _regularity(values: list[float], scale: float) -> float:
+    centers = [fsum(band) / len(band) for band in _bands(values, 0.6 * scale)]
+    if len(centers) < 3:
         return 1.0
-    xs = [tile.cx for tile in tiles]
-    ys = [tile.cy for tile in tiles]
-    coordinates = ys if orientation == "vertical" and pstdev(ys) > pstdev(xs) else xs
-    ordered = sorted(coordinates)
     gaps = [
         current - previous
-        for previous, current in zip(ordered, ordered[1:])
+        for previous, current in zip(centers, centers[1:])
     ]
     mean_gap = fsum(gaps) / len(gaps)
     return max(0.0, min(1.0, 1 - pstdev(gaps) / mean_gap)) if mean_gap else 1.0
 
 
-def _assign_roles(clusters: list[Cluster], params: LayoutParams) -> None:
+def _principal_axis(
+    xs: list[float], ys: list[float]
+) -> tuple[tuple[float, float], float]:
+    if len(xs) < 2:
+        return (1.0, 0.0), 1.0
+    mean_x, mean_y = fsum(xs) / len(xs), fsum(ys) / len(ys)
+    xx = fsum((x - mean_x) ** 2 for x in xs)
+    yy = fsum((y - mean_y) ** 2 for y in ys)
+    xy = fsum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True))
+    angle = 0.5 * atan2(2 * xy, xx - yy)
+    spread = xx + yy
+    difference = hypot(xx - yy, 2 * xy)
+    axis = (cos(angle), sin(angle))
+    if (
+        abs(axis[0]) >= abs(axis[1]) and axis[0] < 0
+        or abs(axis[1]) > abs(axis[0]) and axis[1] < 0
+    ):
+        axis = (-axis[0], -axis[1])
+    return axis, (spread + difference) / (2 * spread) if spread else 1.0
+
+
+def _order_tiles(
+    tiles: tuple[TileBox, ...],
+    axis: tuple[float, float],
+    scale: float,
+) -> tuple[TileBox, ...]:
+    rows: list[list[tuple[float, float, TileBox]]] = []
+    projected = sorted(
+        [
+            (
+                -tile.cx * axis[1] + tile.cy * axis[0],
+                tile.cx * axis[0] + tile.cy * axis[1],
+                tile,
+            )
+            for tile in tiles
+        ],
+        key=lambda item: (item[0], item[1]),
+    )
+    for across, along, tile in projected:
+        if not rows or across - rows[-1][-1][0] > 0.6 * scale:
+            rows.append([])
+        rows[-1].append((across, along, tile))
+    return tuple(
+        item[2]
+        for row in rows
+        for item in sorted(row, key=lambda value: value[1])
+    )
+
+
+def _assign_roles(
+    clusters: list[Cluster], params: LayoutParams
+) -> tuple[Cluster | None, Cluster | None]:
+    scene_scale = median(cluster.scale for cluster in clusters)
     candidates = [
         (score, cluster)
         for cluster in clusters
-        if (score := _hand_score(cluster, params)) is not None
+        if (score := _hand_score(cluster, scene_scale, params)) is not None
     ]
+    hand = None
     if candidates:
         score, hand = max(candidates, key=lambda item: item[0])
-        hand.role, hand.heuristic_score = "hand", score
+        parts = [hand]
+        merged = hand
+        while True:
+            companion = next(
+                (
+                    cluster
+                    for cluster in clusters
+                    if cluster not in parts
+                    and _is_hand_companion(merged, cluster, params)
+                ),
+                None,
+            )
+            if companion is None:
+                break
+            parts.append(companion)
+            merged = _describe(
+                tuple(tile for cluster in parts for tile in cluster.tiles)
+            )
+        merged.role, merged.heuristic_score = "hand", score
+        clusters[:] = [
+            merged,
+            *(cluster for cluster in clusters if cluster not in parts),
+        ]
+        hand = merged
+
+    wall_candidates = [
+        (score, cluster)
+        for cluster in clusters
+        if cluster is not hand
+        and (score := _dead_wall_score(cluster, params)) is not None
+    ]
+    dead_wall = None
+    if wall_candidates:
+        score, dead_wall = max(wall_candidates, key=lambda item: item[0])
+        dead_wall.role, dead_wall.heuristic_score = "dead_wall", score
+
     for cluster in clusters:
         if cluster.role != "other":
             continue
-        aspect = median(tile.aspect for tile in cluster.tiles)
-        if cluster.dominant_orientation == "vertical" and aspect > params.wall_aspect:
-            cluster.role = "wall"
-            cluster.heuristic_score = min(
-                1.0, (aspect - params.wall_aspect) / 2 + 0.5
-            )
-        elif cluster.tile_count >= params.discard_min_tiles:
-            cluster.role, cluster.heuristic_score = "discard", 0.5
+        if cluster.tile_count >= params.discard_min_tiles:
+            cluster.role, cluster.heuristic_score = "discard", cluster.regularity
+    return hand, dead_wall
 
 
-def _hand_score(cluster: Cluster, params: LayoutParams) -> float | None:
-    y = cluster.centroid[1]
+def _hand_score(
+    cluster: Cluster, scene_scale: float, params: LayoutParams
+) -> float | None:
     if (
-        y < params.hand_y_min
+        cluster.tile_count < params.hand_min_tiles
         or cluster.rows > params.hand_max_rows
-        or cluster.tile_count > params.hand_max_tiles
     ):
         return None
-    low = (y - params.hand_y_min) / (1 - params.hand_y_min)
-    weight = params.hand_y_weight + params.hand_regularity_weight
+    edge = 1 - 2 * _edge_distance(cluster)
+    count = min(1.0, cluster.tile_count / 13)
+    relative_scale = cluster.scale / (cluster.scale + scene_scale)
+    shape = (cluster.regularity + cluster.linearity) / 2
+    overflow = max(0, cluster.tile_count - params.hand_max_tiles) / params.hand_max_tiles
     return (
-        params.hand_y_weight * low
-        + params.hand_regularity_weight * cluster.regularity
-    ) / weight
+        0.35 * count
+        + 0.25 * relative_scale
+        + 0.25 * edge
+        + 0.15 * shape
+        - 0.25 * overflow
+    )
+
+
+def _is_hand_companion(
+    hand: Cluster, candidate: Cluster, params: LayoutParams
+) -> bool:
+    if hand.tile_count + candidate.tile_count > params.hand_max_tiles:
+        return False
+    sizes = hand.scale / candidate.scale
+    return (
+        0.5 <= sizes <= 2
+        and _bounds_gap(hand.bounds, candidate.bounds)
+        <= params.hand_merge_gap_k * max(hand.scale, candidate.scale)
+        and abs(_edge_distance(hand) - _edge_distance(candidate))
+        <= params.hand_merge_gap_k * max(hand.scale, candidate.scale)
+    )
+
+
+def _edge_distance(cluster: Cluster) -> float:
+    left, top, right, bottom = cluster.bounds
+    return min(left, top, 1 - right, 1 - bottom)
+
+
+def _bounds_gap(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> float:
+    horizontal = max(first[0] - second[2], second[0] - first[2], 0)
+    vertical = max(first[1] - second[3], second[1] - first[3], 0)
+    return hypot(horizontal, vertical)
+
+
+def _dead_wall_score(
+    cluster: Cluster, params: LayoutParams
+) -> float | None:
+    if (
+        not params.dead_wall_min_tiles
+        <= cluster.tile_count
+        <= params.dead_wall_max_tiles
+        or cluster.rows > 2
+    ):
+        return None
+    shape = median(max(tile.aspect, 1 / tile.aspect) for tile in cluster.tiles)
+    if shape < params.wall_aspect:
+        return None
+    return (
+        0.45 * (cluster.rows == 2)
+        + 0.35 * shape / (shape + 1)
+        + 0.20 * cluster.regularity
+    )

@@ -58,3 +58,11 @@ commit `4955fb61e3d9dab7e6a3640ce2a63759ca0da27f`
 валидацию normalized boxes и лимит detections. OCR, classifier, CLI и
 visualization не копируются. CC BY 4.0 dataset импортирован отдельно в
 `vision/datasets/haitaks-mahjong-layout-v2` как single-class detector baseline.
+
+Повторный GitHub-аудит 2026-07-30 не нашёл reusable physical-table grouper:
+riichi-проекты группируют уже известное игровое состояние, а не camera boxes.
+Поэтому semantic grouping реализован локальной scale-normalized геометрией без
+новой зависимости. Официальный
+[`Ultralytics/SAHI` guide](https://github.com/ultralytics/ultralytics/blob/main/docs/en/guides/sahi-tiled-inference.md)
+полезен для sliced detection и box merging, но не определяет hand/dead
+wall/discard; заменять им текущие 12 crops стоит только после benchmark.
