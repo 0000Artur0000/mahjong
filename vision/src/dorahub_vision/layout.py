@@ -553,24 +553,28 @@ def _assign_roles(
     directions = _seat_directions(direction)
     for seat in ("left", "opposite", "right"):
         seat_direction = directions[seat]
-        opponent_groups = _components(
-            [
-                cluster
-                for cluster in clusters
-                if cluster.role == "other"
-            ],
-            params.hand_merge_gap_k,
-            radial_direction=seat_direction,
-        )
-        wall_barrier = max(
-            (
-                _projection(wall.centroid, seat_direction)
-                - _projection(center, seat_direction)
-                for wall in walls
-                if _seat(wall.centroid, center, directions) == seat
+        opponent_groups = [
+            *_components(
+                [
+                    cluster
+                    for cluster in clusters
+                    if cluster.role in {"other", "wall"}
+                    and _face_count(cluster, params.face_threshold) > 0
+                ],
+                params.hand_merge_gap_k,
+                radial_direction=seat_direction,
             ),
-            default=0.0,
-        )
+            *_components(
+                [
+                    cluster
+                    for cluster in clusters
+                    if cluster.role in {"other", "wall"}
+                    and _face_count(cluster, params.face_threshold) == 0
+                ],
+                params.hand_merge_gap_k,
+                radial_direction=seat_direction,
+            ),
+        ]
         scene_radius = max(
             0.5,
             2
@@ -585,6 +589,21 @@ def _assign_roles(
         candidates = []
         for parts in opponent_groups:
             merged = _merged(parts, frame)
+            inner_walls = [
+                wall
+                for wall in walls
+                if wall not in parts
+                and wall is not dead_wall
+                and _seat(wall.centroid, center, directions) == seat
+            ]
+            wall_barrier = max(
+                (
+                    _projection(wall.centroid, seat_direction)
+                    - _projection(center, seat_direction)
+                    for wall in inner_walls
+                ),
+                default=0.0,
+            )
             outward = _projection(merged.centroid, seat_direction) - _projection(
                 center, seat_direction
             )
@@ -598,12 +617,52 @@ def _assign_roles(
                 or (seat == "right" and merged.centroid[0] >= 0.85)
                 or (seat == "opposite" and merged.centroid[1] <= 0.15)
             )
+            visible = _face_count(merged, params.face_threshold) > 0
+            table_edge = min(
+                merged.centroid[0],
+                merged.centroid[1],
+                1 - merged.centroid[0],
+            ) <= 0.15
+            near_wall = any(
+                _cluster_gap(merged, wall)
+                <= 2 * max(merged.scale, wall.scale)
+                for wall in inner_walls
+            )
+            visible_seed = visible and (
+                (
+                    near_wall
+                    and merged.tile_count >= 7
+                    and merged.linearity >= 0.95
+                )
+                or (
+                    edge_seed
+                    and (
+                        merged.tile_count <= 4
+                        or any(part.role == "wall" for part in parts)
+                    )
+                )
+                or (
+                    table_edge
+                    and any(part.role == "wall" for part in parts)
+                )
+            )
+            closed_seed = (
+                merged.tile_count >= 6
+                and wall_barrier
+                and outward > wall_barrier + merged.scale
+            ) or (
+                merged.tile_count >= 10
+                and edge_seed
+            )
             if (
-                3 <= merged.tile_count <= params.hand_max_tiles
+                (
+                    2 <= merged.tile_count <= params.hand_max_tiles
+                    if visible and edge_seed
+                    else 3 <= merged.tile_count <= params.hand_max_tiles
+                )
                 and (
-                    outward
-                    > wall_barrier + merged.scale
-                    or (not wall_barrier and edge_seed)
+                    visible_seed
+                    or closed_seed
                 )
                 and outward <= scene_radius
                 and (
@@ -617,8 +676,9 @@ def _assign_roles(
                 <= 0.65
             ):
                 candidates.append((outward, parts))
-        if candidates:
-            _, parts = max(candidates, key=lambda item: item[0])
+        for _, parts in sorted(candidates, reverse=True, key=lambda item: item[0]):
+            if not all(part in clusters for part in parts):
+                continue
             _replace(
                 clusters,
                 parts,
@@ -627,6 +687,13 @@ def _assign_roles(
                 seat=seat,
             )
 
+    _promote_edge_hands(
+        clusters,
+        params,
+        directions,
+        frame,
+    )
+
     discard_candidates = [
         cluster
         for cluster in clusters
@@ -634,6 +701,15 @@ def _assign_roles(
         and cluster.tile_count >= params.discard_min_tiles
         and _face_count(cluster, params.face_threshold) > 0
     ]
+    if frame:
+        for cluster in discard_candidates:
+            if not 0.1 <= cluster.centroid[0] <= 0.9:
+                cluster.role = "noise"
+        discard_candidates = [
+            cluster
+            for cluster in discard_candidates
+            if cluster.role == "other"
+        ]
     if discard_candidates:
         discard_center = _center(discard_candidates)
         distances = [
@@ -666,6 +742,107 @@ def _assign_roles(
             clusters, dead_wall, params, frame
         )
     return hand, dead_wall
+
+
+def _promote_edge_hands(
+    clusters: list[Cluster],
+    params: LayoutParams,
+    directions: dict[str, tuple[float, float]],
+    frame: TableFrame | None,
+) -> None:
+    live_walls = [cluster for cluster in clusters if cluster.role == "wall"]
+    for cluster in clusters:
+        if (
+            cluster.role == "other"
+            and 7 <= cluster.tile_count <= params.hand_max_tiles
+            and cluster.linearity >= 0.95
+            and _face_count(cluster, params.face_threshold) > 0
+            and _opponent_edge(cluster.centroid)[1] > 0.15
+            and any(
+                _cluster_gap(cluster, wall)
+                <= 3 * max(cluster.scale, wall.scale)
+                for wall in live_walls
+            )
+        ):
+            cluster.role = "opponent_hand"
+            cluster.seat, _ = _opponent_edge(cluster.centroid)
+
+    by_edge: dict[str, list[Cluster]] = {
+        "left": [],
+        "opposite": [],
+        "right": [],
+    }
+    for wall in live_walls:
+        seat, edge_distance = _opponent_edge(wall.centroid)
+        if edge_distance <= 0.15:
+            by_edge[seat].append(wall)
+            if _face_count(wall, params.face_threshold) > 0:
+                wall.role = "opponent_hand"
+                wall.seat = seat
+
+    for seat, edge_walls in by_edge.items():
+        back_walls = [
+            wall
+            for wall in edge_walls
+            if wall.role == "wall"
+            and _face_count(wall, params.face_threshold) == 0
+        ]
+        if len(back_walls) < 2:
+            continue
+        outward = directions[seat]
+        ranked = sorted(
+            back_walls,
+            key=lambda wall: _projection(wall.centroid, outward),
+            reverse=True,
+        )
+        if (
+            _projection(ranked[0].centroid, outward)
+            - _projection(ranked[1].centroid, outward)
+            >= ranked[0].scale
+        ):
+            ranked[0].role = "opponent_hand"
+            ranked[0].seat = seat
+
+    for seat in ("left", "opposite", "right"):
+        for parts in _components(
+            [
+                cluster
+                for cluster in clusters
+                if cluster.role == "other"
+                and _opponent_edge(cluster.centroid)[0] == seat
+                and _opponent_edge(cluster.centroid)[1] <= 0.15
+            ],
+            params.hand_merge_gap_k,
+            radial_direction=directions[seat],
+        ):
+            merged = _merged(parts, frame)
+            if (
+                len(parts) >= 2
+                and 6 <= merged.tile_count <= params.hand_max_tiles
+                and _face_count(merged, params.face_threshold) == 0
+                and abs(
+                    merged.axis[0] * directions[seat][0]
+                    + merged.axis[1] * directions[seat][1]
+                )
+                <= 0.65
+            ):
+                _replace(
+                    clusters,
+                    parts,
+                    "opponent_hand",
+                    frame=frame,
+                    seat=seat,
+                )
+
+
+def _opponent_edge(point: tuple[float, float]) -> tuple[str, float]:
+    distances = {
+        "left": point[0],
+        "opposite": point[1],
+        "right": 1 - point[0],
+    }
+    seat = min(distances, key=distances.get)
+    return seat, distances[seat]
 
 
 def _split_dead_wall_dora(

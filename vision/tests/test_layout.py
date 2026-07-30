@@ -215,7 +215,20 @@ class LayoutTest(unittest.TestCase):
                 0.04,
                 face_score=0.0,
             )
-            for x in (0.62, 0.65, 0.68, 0.71, 0.79, 0.82, 0.85)
+            for x in (
+                0.49,
+                0.52,
+                0.55,
+                0.58,
+                0.61,
+                0.64,
+                0.67,
+                0.70,
+                0.73,
+                0.76,
+                0.79,
+                0.82,
+            )
         ]
         discards = [
             TileBox(
@@ -246,9 +259,61 @@ class LayoutTest(unittest.TestCase):
         )
 
         self.assertEqual(result.hand.tile_count, 14)
-        self.assertEqual(result.opponent_hands[0].tile_count, 7)
+        self.assertEqual(result.opponent_hands[0].tile_count, 12)
         self.assertEqual(result.opponent_hands[0].seat, "opposite")
         self.assertEqual(sum(group.tile_count for group in result.discards), 12)
+
+    def test_opponent_hands_outrank_walls_and_edge_noise(self) -> None:
+        own = [
+            TileBox(0.15 + index * 0.045, 0.85, 0.035, 0.055, face_score=1)
+            for index in range(14)
+        ]
+        live_wall = [
+            TileBox(0.10 + index * 0.028, 0.25, 0.026, 0.018, face_score=0)
+            for index in range(15)
+        ]
+        closed_hand = [
+            TileBox(0.10 + index * 0.028, 0.05, 0.025, 0.04, face_score=0)
+            for index in range(12)
+        ]
+        open_hand = [
+            TileBox(
+                0.38 + index * 0.028,
+                0.18,
+                0.025,
+                0.04,
+                face_score=1,
+            )
+            for index in range(9)
+        ]
+        paper = [
+            TileBox(0.03 + index * 0.035, 0.5, 0.025, 0.04, face_score=1)
+            for index in range(2)
+        ]
+        edge_meld = [
+            *[
+                TileBox(0.65 + index * 0.028, 0.04, 0.025, 0.04, face_score=0)
+                for index in range(4)
+            ],
+            *[
+                TileBox(0.80 + index * 0.028, 0.05, 0.025, 0.04, face_score=0)
+                for index in range(3)
+            ],
+        ]
+
+        result = cluster_layout(
+            own + live_wall + closed_hand + open_hand + edge_meld + paper,
+            LayoutParams(
+                player_direction=(0, 1),
+                table_corners=((0, 0), (1, 0), (1, 1), (0, 1)),
+            ),
+        )
+        self.assertEqual(
+            sorted(group.tile_count for group in result.opponent_hands),
+            [7, 9, 12],
+        )
+        self.assertIn(15, [group.tile_count for group in result.walls])
+        self.assertEqual([group.tile_count for group in result.noise], [2])
 
     def test_hand_selection_is_not_tied_to_bottom_of_image(self) -> None:
         result = cluster_layout(
