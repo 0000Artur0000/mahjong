@@ -103,6 +103,7 @@ class TileBox:
     height: float
     class_id: int | None = None
     face_score: float | None = None
+    angle: float | None = None
 
     def __post_init__(self) -> None:
         values = (self.cx, self.cy, self.width, self.height)
@@ -126,6 +127,13 @@ class TileBox:
                     isinstance(self.face_score, bool)
                     or not isfinite(self.face_score)
                     or not 0 <= self.face_score <= 1
+                )
+            )
+            or (
+                self.angle is not None
+                and (
+                    isinstance(self.angle, bool)
+                    or not isfinite(self.angle)
                 )
             )
         ):
@@ -215,6 +223,15 @@ class Cluster:
 
 
 @dataclass(frozen=True)
+class Meld:
+    kind: str
+    tiles: tuple[TileBox, ...]
+    bounds: tuple[float, float, float, float]
+    seat: str
+    called_index: int
+
+
+@dataclass(frozen=True)
 class LayoutResult:
     clusters: tuple[Cluster, ...]
     hand: Cluster | None
@@ -225,6 +242,7 @@ class LayoutResult:
     dora: tuple[Cluster, ...] = ()
     opponent_hands: tuple[Cluster, ...] = ()
     noise: tuple[Cluster, ...] = ()
+    melds: tuple[Meld, ...] = ()
 
 
 def cluster_layout(
@@ -244,6 +262,12 @@ def cluster_layout(
     frame = TableFrame(config.table_corners) if config.table_corners else None
     clusters = _cluster(tiles, config, frame)
     hand, dead_wall = _assign_roles(clusters, config, frame)
+    melds = tuple(
+        meld
+        for cluster in clusters
+        if cluster.role in {"hand", "opponent_hand"}
+        for meld in _open_melds(cluster, frame, config.face_threshold)
+    )
     return LayoutResult(
         clusters=tuple(clusters),
         hand=hand,
@@ -264,6 +288,7 @@ def cluster_layout(
             if cluster.role == "opponent_hand"
         ),
         noise=tuple(cluster for cluster in clusters if cluster.role == "noise"),
+        melds=melds,
     )
 
 
@@ -948,6 +973,116 @@ def _open_meld_sizes(
         for start, end in zip((0, *cuts), (*cuts, len(projections)), strict=True)
     )
     return sizes if len(sizes) >= 2 and all(3 <= size <= 4 for size in sizes) else ()
+
+
+def _open_melds(
+    cluster: Cluster,
+    frame: TableFrame | None,
+    face_threshold: float,
+) -> tuple[Meld, ...]:
+    ordered = sorted(
+        cluster.tiles,
+        key=lambda tile: _projection(_point(tile, frame), cluster.axis),
+    )
+    projections = [
+        _projection(_point(tile, frame), cluster.axis) for tile in ordered
+    ]
+    gaps = [
+        current - previous
+        for previous, current in zip(projections, projections[1:])
+    ]
+    cuts = (
+        [
+            index
+            for index, gap in enumerate(gaps, start=1)
+            if gap > 1.5 * median(gaps)
+        ]
+        if gaps
+        else []
+    )
+    runs = [
+        ordered[start:end]
+        for start, end in zip(
+            (0, *cuts), (*cuts, len(ordered)), strict=True
+        )
+    ]
+    melds = []
+    for tiles in runs:
+        if len(tiles) not in {3, 4}:
+            continue
+        sideways = [
+            tile for tile in tiles if _is_sideways(tile, cluster, frame)
+        ]
+        if len(sideways) != 1:
+            continue
+        described = _describe(tuple(tiles), frame)
+        if _face_count(described, face_threshold) < len(tiles) - 1:
+            continue
+        called = sideways[0]
+        kind = _meld_kind(tiles)
+        if kind is None:
+            continue
+        melds.append(
+            Meld(
+                kind,
+                described.tiles,
+                described.bounds,
+                cluster.seat or "self",
+                described.tiles.index(called),
+            )
+        )
+    return tuple(melds)
+
+
+def _is_sideways(
+    tile: TileBox,
+    cluster: Cluster,
+    frame: TableFrame | None,
+) -> bool:
+    if tile.angle is None:
+        return False
+    start = _point(tile, frame)
+    end = (
+        tile.cx + cos(tile.angle) * tile.size / 2,
+        tile.cy + sin(tile.angle) * tile.size / 2,
+    )
+    end = frame.map(*end) if frame else end
+    axis = _normalize((end[0] - start[0], end[1] - start[1]))
+    return abs(
+        axis[0] * cluster.axis[0] + axis[1] * cluster.axis[1]
+    ) >= 0.7
+
+
+def _meld_kind(tiles: list[TileBox]) -> str | None:
+    classes = [_canonical_class(tile.class_id) for tile in tiles]
+    known = [class_id for class_id in classes if class_id is not None]
+    if len(tiles) == 4:
+        if len(set(known)) > 1:
+            return "kan_candidate"
+        return "kan" if len(known) >= 2 else "kan_candidate"
+    if not known:
+        return None
+    if len(set(known)) == 1:
+        return "pon" if len(known) >= 2 else "chi_or_pon"
+    if any(class_id >= 27 for class_id in known):
+        return "chi_or_pon"
+    suits = {class_id // 9 for class_id in known}
+    ranks = {class_id % 9 for class_id in known}
+    if (
+        len(suits) == 1
+        and len(ranks) == len(known)
+        and max(ranks) - min(ranks) <= 2
+    ):
+        return "chi"
+    return "chi_or_pon"
+
+
+def _canonical_class(class_id: int | None) -> int | None:
+    if class_id is None:
+        return None
+    if 0 <= class_id < 34:
+        return class_id
+    return {34: 4, 35: 13, 36: 22}.get(class_id)
 
 
 def _opponent_edge(point: tuple[float, float]) -> tuple[str, float]:

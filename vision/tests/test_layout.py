@@ -1,4 +1,5 @@
 import unittest
+from math import pi
 
 import cv2
 import numpy as np
@@ -202,6 +203,51 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(result.dora[0].tile_count, 1)
         self.assertEqual([cluster.tile_count for cluster in result.discards], [12])
         self.assertEqual(result.discards[0].tiles, tuple(discards))
+
+    def test_names_open_melds_from_gap_rotation_and_tile_classes(self) -> None:
+        def tiles(
+            xs: tuple[float, ...],
+            classes: tuple[int | None, ...],
+        ) -> list[TileBox]:
+            return [
+                TileBox(
+                    x,
+                    0.88,
+                    0.025,
+                    0.04,
+                    class_id,
+                    1.0,
+                    0.0 if index == 0 else pi / 2,
+                )
+                for index, (x, class_id) in enumerate(
+                    zip(xs, classes, strict=True)
+                )
+            ]
+
+        concealed = [
+            TileBox(
+                0.10 + index * 0.03,
+                0.88,
+                0.025,
+                0.04,
+                face_score=1.0,
+                angle=pi / 2,
+            )
+            for index in range(7)
+        ]
+        result = cluster_layout(
+            concealed
+            + tiles((0.35, 0.38, 0.41), (0, 1, None))
+            + tiles((0.48, 0.51, 0.54), (9, 9, None))
+            + tiles((0.61, 0.64, 0.67, 0.70), (18, 18, None, None)),
+            LayoutParams(player_direction=(0, 1)),
+        )
+
+        self.assertEqual(
+            [(meld.kind, len(meld.tiles)) for meld in result.melds],
+            [("chi", 3), ("pon", 3), ("kan", 4)],
+        )
+        self.assertTrue(all(meld.called_index == 0 for meld in result.melds))
 
     def test_does_not_guess_wall_or_dead_wall_without_back_majority(self) -> None:
         ambiguous = [

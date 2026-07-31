@@ -3,6 +3,7 @@
 import argparse
 import json
 from collections.abc import Iterable
+from math import atan2, hypot
 from pathlib import Path
 
 import cv2
@@ -12,10 +13,12 @@ from dorahub_vision.quad import quad_from_points
 from dorahub_vision.layout import (
     Cluster,
     LayoutParams,
+    Meld,
     TableFrame,
     TileBox,
     cluster_layout,
 )
+from dorahub_vision.riichi import MODEL_TILES
 from vision.scripts.table_plane import (
     appearance_face_score,
     propose_back_tiles,
@@ -29,6 +32,13 @@ COLORS = {
     "dora": (255, 0, 255),
     "discard": (0, 171, 255),
 }
+MELD_COLORS = {
+    "chi": (0, 255, 255),
+    "pon": (255, 0, 160),
+    "kan": (0, 0, 255),
+    "kan_candidate": (0, 128, 255),
+    "chi_or_pon": (255, 255, 255),
+}
 
 
 def render_predictions(
@@ -38,19 +48,37 @@ def render_predictions(
     output: Path,
 ) -> list[Path]:
     predictions = json.loads(predictions_path.read_text())
-    face_predictions = {
-        Path(item["image"]).name: item["detections"]
-        for item in json.loads(face_predictions_path.read_text())
-    }
+    countgd = isinstance(predictions, dict)
+    items = (
+        (
+            {"image": image, "countgd": result}
+            for image, result in predictions.items()
+        )
+        if countgd
+        else predictions
+    )
+    face_predictions = (
+        {}
+        if str(face_predictions_path) == "-"
+        else {
+            Path(item["image"]).name: item["detections"]
+            for item in json.loads(face_predictions_path.read_text())
+        }
+    )
     output.mkdir(parents=True, exist_ok=True)
     rendered = []
     summary = []
-    for item in predictions:
+    for item in items:
         image_path = image_root / item["image"]
         image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"cannot decode {image_path}")
-        raw_boxes = [tuple(detection["box"]) for detection in item["detections"]]
+        detections = (
+            _countgd_detections(item["countgd"], image.shape)
+            if countgd
+            else [dict(detection) for detection in item["detections"]]
+        )
+        raw_boxes = [tuple(detection["box"]) for detection in detections]
         points = [(box[0], box[1]) for box in raw_boxes]
         # Круглый или обрезанный стол не имеет четырёх видимых углов. Сцена по
         # самим тайлам не зависит от центра кадра и не выдумывает перспективу.
@@ -66,7 +94,9 @@ def render_predictions(
         )
         # Рубашки чужого цвета детектор не видит вовсе: без них не найти ни стену,
         # ни мёртвую стену, ни дору. Дополняем предложениями по цвету.
-        for proposal in propose_back_tiles(image, corners, raw_boxes):
+        for proposal in (
+            () if countgd else propose_back_tiles(image, corners, raw_boxes)
+        ):
             # Нарезка по повёрнутому прямоугольнику может выйти за край кадра —
             # TileBox принимает только нормированные координаты.
             # Бокс обязан целиком лежать в кадре, а не только центром: обрезаем
@@ -77,7 +107,7 @@ def render_predictions(
             box_height = max(1e-4, min(proposal.height, 2 * cy, 2 * (1 - cy)))
             if box_width <= 1e-4 or box_height <= 1e-4:
                 continue
-            item["detections"].append(
+            detections.append(
                 {
                     "tile": "tile",
                     "confidence": 0.0,
@@ -87,20 +117,38 @@ def render_predictions(
             )
 
         faces = face_predictions.get(image_path.name, ())
-        boxes = [
-            TileBox(
-                *detection["box"],
-                face_score=max(
-                    (
-                        face["confidence"]
-                        for face in faces
-                        if _iou(detection["box"], face["box"]) >= 0.2
-                    ),
-                    default=0.0,
+        boxes = []
+        for detection in detections:
+            matched = max(
+                (
+                    face
+                    for face in faces
+                    if _iou(detection["box"], face["box"]) >= 0.2
                 ),
+                key=lambda face: face["confidence"],
+                default=None,
             )
-            for detection in item["detections"]
-        ]
+            box = TileBox(
+                *detection["box"],
+                class_id=(
+                    MODEL_TILES.index(matched["tile"])
+                    if matched and matched["tile"] in MODEL_TILES
+                    else None
+                ),
+                face_score=matched["confidence"] if matched else 0.0,
+                angle=detection.get("angle"),
+            )
+            if countgd and matched is None:
+                box = TileBox(
+                    box.cx,
+                    box.cy,
+                    box.width,
+                    box.height,
+                    box.class_id,
+                    appearance_face_score(image, box),
+                    box.angle,
+                )
+            boxes.append(box)
         layout = cluster_layout(boxes, params)
         fallback = {
             tile
@@ -129,6 +177,7 @@ def render_predictions(
                         tile.face_score or 0,
                         appearance_face_score(image, tile),
                     ),
+                    tile.angle,
                 )
                 if tile in fallback
                 else tile
@@ -137,7 +186,7 @@ def render_predictions(
             layout = cluster_layout(boxes, params)
 
         frame = TableFrame(corners)
-        preview = _draw(image, frame, layout.clusters)
+        preview = _draw(image, frame, layout.clusters, layout.melds)
         target = output / f"{image_path.stem}.jpg"
         if not cv2.imwrite(str(target), preview):
             raise ValueError(f"cannot write {target}")
@@ -147,6 +196,15 @@ def render_predictions(
                 "image": image_path.name,
                 "tableCorners": corners,
                 "plane": plane,
+                "melds": [
+                    {
+                        "kind": meld.kind,
+                        "seat": meld.seat,
+                        "tiles": len(meld.tiles),
+                        "calledIndex": meld.called_index,
+                    }
+                    for meld in layout.melds
+                ],
                 "groups": [
                     {
                         "role": cluster.role,
@@ -179,6 +237,7 @@ def _draw(
     image: np.ndarray,
     frame: TableFrame,
     clusters: Iterable[Cluster],
+    melds: Iterable[Meld] = (),
 ) -> np.ndarray:
     height, width = image.shape[:2]
     filled = image.copy()
@@ -236,7 +295,86 @@ def _draw(
             2,
             cv2.LINE_AA,
         )
+    for meld in melds:
+        left, top, right, bottom = meld.bounds
+        polygon = np.array(
+            [
+                (round(x * width), round(y * height))
+                for x, y in (
+                    frame.unmap(left, top),
+                    frame.unmap(right, top),
+                    frame.unmap(right, bottom),
+                    frame.unmap(left, bottom),
+                )
+            ],
+            dtype=np.int32,
+        )
+        color = MELD_COLORS[meld.kind]
+        cv2.polylines(preview, [polygon], True, color, 6)
+        cv2.putText(
+            preview,
+            f"{meld.kind}/{meld.seat}",
+            tuple(polygon[np.argmin(polygon[:, 1])]),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
     return preview
+
+
+def _countgd_detections(
+    result: dict[str, object],
+    image_shape: tuple[int, ...],
+) -> list[dict[str, object]]:
+    height, width = image_shape[:2]
+    polygons = result.get("polygons", ())
+    detections = []
+    for index, raw_box in enumerate(result["boxes"]):
+        left, top, right, bottom = raw_box
+        left, right = sorted(
+            (
+                min(float(width), max(0.0, left)),
+                min(float(width), max(0.0, right)),
+            )
+        )
+        top, bottom = sorted(
+            (
+                min(float(height), max(0.0, top)),
+                min(float(height), max(0.0, bottom)),
+            )
+        )
+        if right <= left or bottom <= top:
+            continue
+        angle = None
+        if index < len(polygons):
+            points = polygons[index]
+            edges = [
+                (
+                    second[0] - first[0],
+                    second[1] - first[1],
+                )
+                for first, second in zip(
+                    points, (*points[1:], points[0]), strict=True
+                )
+            ]
+            dx, dy = max(edges, key=lambda edge: hypot(*edge))
+            angle = atan2(dy / height, dx / width)
+        detections.append(
+            {
+                "tile": "tile",
+                "confidence": result["scores"][index],
+                "box": [
+                    (left + right) / (2 * width),
+                    (top + bottom) / (2 * height),
+                    (right - left) / width,
+                    (bottom - top) / height,
+                ],
+                "angle": angle,
+            }
+        )
+    return detections
 
 
 def _iou(first: list[float], second: list[float]) -> float:
