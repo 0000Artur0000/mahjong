@@ -12,13 +12,14 @@ from vision.scripts.layout_preview import _tile_prism, render_predictions
 
 class LayoutPreviewTest(unittest.TestCase):
     def test_builds_a_visible_prism_for_each_tile(self) -> None:
-        top, bottom, sides = _tile_prism(
+        face, back, sides = _tile_prism(
             TileBox(0.5, 0.5, 0.1, 0.2),
             (200, 300, 3),
+            (150, 20),
         )
 
-        self.assertEqual(top.shape, (4, 2))
-        self.assertTrue(np.all(bottom > top))
+        self.assertEqual(face.shape, (4, 2))
+        self.assertTrue(np.all(back[:, 1] < face[:, 1]))
         self.assertEqual(len(sides), 4)
 
     def test_renders_real_cli_path(self) -> None:

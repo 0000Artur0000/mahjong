@@ -13,7 +13,6 @@ from dorahub_vision.quad import quad_from_points
 from dorahub_vision.layout import (
     Cluster,
     LayoutParams,
-    Meld,
     TableFrame,
     TileBox,
     cluster_layout,
@@ -32,15 +31,6 @@ COLORS = {
     "dora": (255, 0, 255),
     "discard": (0, 171, 255),
 }
-MELD_COLORS = {
-    "chi": (0, 255, 255),
-    "pon": (255, 0, 160),
-    "kan": (0, 0, 255),
-    "kan_candidate": (0, 128, 255),
-    "chi_or_pon": (255, 255, 255),
-}
-
-
 def render_predictions(
     predictions_path: Path,
     face_predictions_path: Path,
@@ -186,7 +176,7 @@ def render_predictions(
             layout = cluster_layout(boxes, params)
 
         frame = TableFrame(corners)
-        preview = _draw(image, frame, layout.clusters, layout.melds)
+        preview = _draw(image, frame, layout.clusters)
         target = output / f"{image_path.stem}.jpg"
         if not cv2.imwrite(str(target), preview):
             raise ValueError(f"cannot write {target}")
@@ -238,117 +228,37 @@ def _draw(
     image: np.ndarray,
     frame: TableFrame,
     clusters: Iterable[Cluster],
-    melds: Iterable[Meld] = (),
 ) -> np.ndarray:
     clusters = tuple(clusters)
     height, width = image.shape[:2]
-    filled = image.copy()
-    polygons = []
-    for cluster in clusters:
-        color = COLORS.get(cluster.role)
-        if color is None:
-            continue
-        left, top, right, bottom = cluster.bounds
-        pad = cluster.scale * 0.2
-        polygon = np.array(
-            [
-                (
-                    round(x * width),
-                    round(y * height),
-                )
-                for x, y in (
-                    frame.unmap(left - pad, top - pad),
-                    frame.unmap(right + pad, top - pad),
-                    frame.unmap(right + pad, bottom + pad),
-                    frame.unmap(left - pad, bottom + pad),
-                )
-            ],
-            dtype=np.int32,
-        )
-        cv2.fillPoly(filled, [polygon], color)
-        polygons.append((cluster, polygon, color))
-    preview = cv2.addWeighted(filled, 0.15, image, 0.85, 0)
-    del filled
-    table = np.array(
-        [
-            (
-                round(x * width),
-                round(y * height),
-            )
-            for x, y in (
-                frame.unmap(0, 0),
-                frame.unmap(1, 0),
-                frame.unmap(1, 1),
-                frame.unmap(0, 1),
-            )
-        ],
-        dtype=np.int32,
-    )
-    cv2.polylines(preview, [table], True, (255, 255, 0), 4)
-    for cluster, polygon, color in polygons:
-        cv2.polylines(preview, [polygon], True, color, 4)
-        seat = f"/{cluster.seat}" if cluster.seat else ""
-        cv2.putText(
-            preview,
-            f"{cluster.role}{seat}: {cluster.tile_count}",
-            tuple(polygon[np.argmin(polygon[:, 1])]),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color,
-            2,
-            cv2.LINE_AA,
-        )
+    center = frame.unmap(0.5, 0.5)
+    table_center = center[0] * width, center[1] * height
     tile_shapes = []
-    tile_fill = preview.copy()
+    tile_fill = image.copy()
     for cluster in clusters:
         color = COLORS.get(cluster.role, (160, 160, 160))
         shade = tuple(round(channel * 0.45) for channel in color)
         for tile in cluster.tiles:
-            top, bottom, sides = _tile_prism(tile, image.shape)
-            cv2.fillPoly(tile_fill, [bottom, *sides], shade)
-            cv2.fillPoly(tile_fill, [top], color)
-            tile_shapes.append((top, bottom, color, shade))
-    preview = cv2.addWeighted(tile_fill, 0.25, preview, 0.75, 0)
+            face, back, sides = _tile_prism(tile, image.shape, table_center)
+            cv2.fillPoly(tile_fill, [back, *sides], shade)
+            cv2.fillPoly(tile_fill, [face], color)
+            tile_shapes.append((face, back, color, shade))
+    preview = cv2.addWeighted(tile_fill, 0.4, image, 0.6, 0)
     del tile_fill
-    for top, bottom, color, shade in tile_shapes:
-        cv2.polylines(preview, [bottom], True, shade, 1, cv2.LINE_AA)
-        cv2.polylines(preview, [top], True, color, 2, cv2.LINE_AA)
-        for start, end in zip(top, bottom, strict=True):
-            cv2.line(preview, tuple(start), tuple(end), shade, 1, cv2.LINE_AA)
-    for meld in melds:
-        left, top, right, bottom = meld.bounds
-        polygon = np.array(
-            [
-                (round(x * width), round(y * height))
-                for x, y in (
-                    frame.unmap(left, top),
-                    frame.unmap(right, top),
-                    frame.unmap(right, bottom),
-                    frame.unmap(left, bottom),
-                )
-            ],
-            dtype=np.int32,
-        )
-        color = MELD_COLORS[meld.kind]
-        cv2.polylines(preview, [polygon], True, color, 6)
-        cv2.putText(
-            preview,
-            f"{meld.kind}/{meld.seat}",
-            tuple(polygon[np.argmin(polygon[:, 1])]),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2,
-            cv2.LINE_AA,
-        )
+    for face, back, color, shade in tile_shapes:
+        cv2.polylines(preview, [back], True, shade, 2, cv2.LINE_AA)
+        cv2.polylines(preview, [face], True, color, 3, cv2.LINE_AA)
+        for start, end in zip(face, back, strict=True):
+            cv2.line(preview, tuple(start), tuple(end), shade, 2, cv2.LINE_AA)
     return preview
 
 
 def _tile_prism(
     tile: TileBox,
     image_shape: tuple[int, ...],
+    table_center: tuple[float, float],
 ) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
-    """Return a small pseudo-3D prism around one detected tile."""
+    """Return a perspective-looking prism around one detected tile."""
 
     height, width = image_shape[:2]
     box_width, box_height = tile.width * width, tile.height * height
@@ -356,21 +266,32 @@ def _tile_prism(
     angle = degrees(tile.angle) if tile.angle is not None else (
         90 if box_height > box_width else 0
     )
-    top = np.rint(
+    face = np.rint(
         cv2.boxPoints(
             ((tile.cx * width, tile.cy * height), (major, minor), angle)
         )
     ).astype(np.int32)
-    depth = max(2, round(minor * 0.08))
-    bottom = top + (depth, depth)
+    dx = table_center[0] - tile.cx * width
+    dy = table_center[1] - tile.cy * height
+    distance = hypot(dx, dy) or 1
+    depth = max(4, min(30, round(minor * 0.35)))
+    offset = np.rint((dx / distance * depth, dy / distance * depth)).astype(
+        np.int32
+    )
+    back = face + offset
     sides = [
         np.array(
-            [top[index], top[(index + 1) % 4], bottom[(index + 1) % 4], bottom[index]],
+            [
+                face[index],
+                face[(index + 1) % 4],
+                back[(index + 1) % 4],
+                back[index],
+            ],
             dtype=np.int32,
         )
         for index in range(4)
     ]
-    return top, bottom, sides
+    return face, back, sides
 
 
 def _countgd_detections(
