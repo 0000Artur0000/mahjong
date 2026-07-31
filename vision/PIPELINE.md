@@ -132,6 +132,20 @@ PYTHONPATH=vision/src:. .mlvenv/bin/python vision/scripts/layout_preview.py \
 местом, числом тайлов и центроидом каждой группы. Роли `noise` и нерешённые группы
 намеренно не рисуются.
 
+### Экспериментальный top-down
+
+Стол можно выпрямить перед вторым проходом:
+
+```bash
+PYTHONPATH=vision/src:. python3 vision/scripts/table_plane.py photo.jpg \
+  --rectify-output /tmp/topdown
+```
+
+На `img_77c49af06036.jpg` это улучшило LiteRT с 64 до 75 лиц, но ухудшило
+single-class YOLO с 70 до 39 боксов при одинаковом пороге. Поэтому top-down пока
+только дополнительный проход: его боксы возвращаются в исходный кадр и
+объединяются NMS; заменять им исходный результат нельзя до общего benchmark.
+
 Быстрый просмотр:
 
 ```bash

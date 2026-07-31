@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from dorahub_vision.layout import TileBox
+from dorahub_vision.layout import TableFrame, TileBox
 
 
 def estimate_table_corners(
@@ -44,7 +44,11 @@ def estimate_table_corners(
         cv2.MORPH_OPEN,
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)),
     )
-    points = cv2.findNonZero(mask)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    if count <= 1:
+        raise ValueError("table surface was not found")
+    table = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    points = cv2.findNonZero((labels == table).astype(np.uint8))
     if points is None:
         raise ValueError("table surface was not found")
     hull = cv2.convexHull(points)
@@ -93,22 +97,95 @@ def appearance_face_score(image: np.ndarray, tile: TileBox) -> float:
     return min(1.0, max(0.0, (float(patch.std()) - 45) / 10))
 
 
+def rectify_table(
+    image: np.ndarray,
+    corners: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ],
+    size: int = 1024,
+) -> np.ndarray:
+    """Warp a confident table quadrilateral to a square top-down image."""
+
+    if size < 32:
+        raise ValueError("rectified image is too small")
+    height, width = image.shape[:2]
+    source = np.float32(
+        [(x * (width - 1), y * (height - 1)) for x, y in corners]
+    )
+    target = np.float32(
+        ((0, 0), (size - 1, 0), (size - 1, size - 1), (0, size - 1))
+    )
+    return cv2.warpPerspective(
+        image,
+        cv2.getPerspectiveTransform(source, target),
+        (size, size),
+    )
+
+
+def unrectify_box(
+    box: list[float],
+    corners: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ],
+) -> list[float]:
+    """Map a normalized top-down box back to the original photo."""
+
+    cx, cy, width, height = box
+    frame = TableFrame(corners)
+    points = [
+        frame.unmap(x, y)
+        for x, y in (
+            (cx - width / 2, cy - height / 2),
+            (cx + width / 2, cy - height / 2),
+            (cx + width / 2, cy + height / 2),
+            (cx - width / 2, cy + height / 2),
+        )
+    ]
+    left = max(0.0, min(x for x, _ in points))
+    top = max(0.0, min(y for _, y in points))
+    right = min(1.0, max(x for x, _ in points))
+    bottom = min(1.0, max(y for _, y in points))
+    return [
+        (left + right) / 2,
+        (top + bottom) / 2,
+        right - left,
+        bottom - top,
+    ]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("images", type=Path, nargs="+")
+    parser.add_argument("--rectify-output", type=Path)
+    parser.add_argument("--size", type=int, default=1024)
     args = parser.parse_args()
+    if args.rectify_output:
+        args.rectify_output.mkdir(parents=True, exist_ok=True)
     for path in args.images:
         image = cv2.imread(str(path))
         if image is None:
             raise ValueError(f"cannot decode {path}")
+        corners = estimate_table_corners(image)
         print(
             json.dumps(
                 {
                     "image": str(path),
-                    "tableCorners": estimate_table_corners(image),
+                    "tableCorners": corners,
                 }
             )
         )
+        if args.rectify_output:
+            target = args.rectify_output / f"{path.stem}-topdown.jpg"
+            if not cv2.imwrite(
+                str(target), rectify_table(image, corners, args.size)
+            ):
+                raise ValueError(f"cannot write {target}")
 
 
 if __name__ == "__main__":

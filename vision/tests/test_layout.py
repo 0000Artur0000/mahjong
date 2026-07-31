@@ -12,6 +12,8 @@ from dorahub_vision.layout import (
 from vision.scripts.table_plane import (
     appearance_face_score,
     estimate_table_corners,
+    rectify_table,
+    unrectify_box,
 )
 
 
@@ -86,6 +88,29 @@ class LayoutTest(unittest.TestCase):
         ):
             self.assertAlmostEqual(actual[0], expected[0], places=6)
             self.assertAlmostEqual(actual[1], expected[1], places=6)
+
+    def test_warps_a_table_image_to_top_down(self) -> None:
+        image = np.zeros((100, 120, 3), dtype=np.uint8)
+        corners = ((0.2, 0.1), (0.8, 0.2), (0.9, 0.9), (0.1, 0.8))
+        polygon = np.array(
+            [(round(x * 119), round(y * 99)) for x, y in corners],
+            dtype=np.int32,
+        )
+        cv2.fillConvexPoly(image, polygon, (255, 255, 255))
+
+        rectified = rectify_table(image, corners, 64)
+
+        self.assertEqual(rectified.shape, (64, 64, 3))
+        self.assertGreater(rectified[32, 32].mean(), 250)
+        for actual, expected in zip(
+            unrectify_box(
+                [0.5, 0.5, 0.2, 0.4],
+                ((0, 0), (1, 0), (1, 1), (0, 1)),
+            ),
+            [0.5, 0.5, 0.2, 0.4],
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual, expected)
 
     def test_clusters_hand_and_keeps_ambiguous_group_unassigned(self) -> None:
         result = cluster_layout(row(0.85, 0.10, 13) + row(0.25, 0.55, 5))
