@@ -8,6 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from dorahub_vision.quad import quad_from_points
 from dorahub_vision.layout import (
     Cluster,
     LayoutParams,
@@ -15,7 +16,10 @@ from dorahub_vision.layout import (
     TileBox,
     cluster_layout,
 )
-from vision.scripts.table_plane import appearance_face_score, estimate_table_corners
+from vision.scripts.table_plane import (
+    appearance_face_score,
+    propose_back_tiles,
+)
 
 COLORS = {
     "hand": (118, 230, 0),
@@ -46,11 +50,42 @@ def render_predictions(
         image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"cannot decode {image_path}")
-        corners = estimate_table_corners(image)
+        raw_boxes = [tuple(detection["box"]) for detection in item["detections"]]
+        points = [(box[0], box[1]) for box in raw_boxes]
+        # Круглый или обрезанный стол не имеет четырёх видимых углов. Сцена по
+        # самим тайлам не зависит от центра кадра и не выдумывает перспективу.
+        corners = (
+            quad_from_points(points)
+            if points
+            else ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+        )
+        plane = "tiles"
         params = LayoutParams(
             player_direction=(0, 1),
             table_corners=corners,
         )
+        # Рубашки чужого цвета детектор не видит вовсе: без них не найти ни стену,
+        # ни мёртвую стену, ни дору. Дополняем предложениями по цвету.
+        for proposal in propose_back_tiles(image, corners, raw_boxes):
+            # Нарезка по повёрнутому прямоугольнику может выйти за край кадра —
+            # TileBox принимает только нормированные координаты.
+            # Бокс обязан целиком лежать в кадре, а не только центром: обрезаем
+            # рамку по краю, сохраняя центр.
+            cx = min(1.0, max(0.0, proposal.cx))
+            cy = min(1.0, max(0.0, proposal.cy))
+            box_width = max(1e-4, min(proposal.width, 2 * cx, 2 * (1 - cx)))
+            box_height = max(1e-4, min(proposal.height, 2 * cy, 2 * (1 - cy)))
+            if box_width <= 1e-4 or box_height <= 1e-4:
+                continue
+            item["detections"].append(
+                {
+                    "tile": "tile",
+                    "confidence": 0.0,
+                    "proposed": True,
+                    "box": [cx, cy, box_width, box_height],
+                }
+            )
+
         faces = face_predictions.get(image_path.name, ())
         boxes = [
             TileBox(
@@ -111,6 +146,7 @@ def render_predictions(
             {
                 "image": image_path.name,
                 "tableCorners": corners,
+                "plane": plane,
                 "groups": [
                     {
                         "role": cluster.role,
@@ -118,6 +154,17 @@ def render_predictions(
                         "tiles": cluster.tile_count,
                         "centroid": [
                             round(value, 3) for value in cluster.centroid
+                        ],
+                        # Боксы нужны, чтобы сравнивать результат с эталонной
+                        # разметкой ролей потайлово: по счётчику этого не сделать.
+                        "tileBoxes": [
+                            [
+                                round(tile.cx, 4),
+                                round(tile.cy, 4),
+                                round(tile.width, 4),
+                                round(tile.height, 4),
+                            ]
+                            for tile in cluster.tiles
                         ],
                     }
                     for cluster in layout.clusters

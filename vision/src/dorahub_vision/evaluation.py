@@ -71,8 +71,8 @@ def evaluate(
             "rejectedScenes": len(rows) - len(accepted),
         },
         "rates": {
-            "automationCoverage": _rate(len(accepted), len(rows)),
-            "falseAccept": _rate(
+            "automationCoverage": rate(len(accepted), len(rows)),
+            "falseAccept": rate(
                 sum(
                     not is_exact
                     for row, is_exact in zip(rows, exact, strict=True)
@@ -80,12 +80,12 @@ def evaluate(
                 ),
                 len(accepted),
             ),
-            "exactHand": _rate(sum(exact), len(rows)),
-            "detectionPrecision": _rate(detected, detected + false_detections),
-            "detectionRecall": _rate(detected, truth_tiles),
-            "classificationAccuracy": _rate(correctly_classified, detected),
-            "groupingAccuracy": _rate(correct_groups, total_groups),
-            "reshoot": _rate(sum(row.reshoot for row in rows), len(rows)),
+            "exactHand": rate(sum(exact), len(rows)),
+            "detectionPrecision": rate(detected, detected + false_detections),
+            "detectionRecall": rate(detected, truth_tiles),
+            "classificationAccuracy": rate(correctly_classified, detected),
+            "groupingAccuracy": rate(correct_groups, total_groups),
+            "reshoot": rate(sum(row.reshoot for row in rows), len(rows)),
         },
         "ux": {
             "meanCorrectedTiles": (
@@ -97,7 +97,9 @@ def evaluate(
     }
 
 
-def _rate(numerator: int, denominator: int) -> dict[str, int | float | None]:
+def rate(numerator: int, denominator: int) -> dict[str, int | float | None]:
+    """Доля с сохранением числителя и знаменателя; пустой знаменатель даёт null."""
+
     return {
         "numerator": numerator,
         "denominator": denominator,

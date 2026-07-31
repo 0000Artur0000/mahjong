@@ -55,8 +55,8 @@ commit `4955fb61e3d9dab7e6a3640ce2a63759ca0da27f`
 
 В Dorahub перенесены идеи `TileBox → scale-aware DBSCAN → hand/discard/wall`
 и параметры калибровки. Реализация адаптирована на Python stdlib и добавляет
-валидацию normalized boxes и лимит detections. OCR, classifier, CLI и
-visualization не копируются. CC BY 4.0 dataset импортирован отдельно в
+валидацию normalized boxes, лимит detections и ограничения структуры риичи.
+OCR, classifier, CLI и visualization не копируются. CC BY 4.0 dataset импортирован отдельно в
 `vision/datasets/haitaks-mahjong-layout-v2` как single-class detector baseline.
 
 Повторный GitHub-аудит 2026-07-30 не нашёл reusable physical-table grouper:
@@ -64,14 +64,15 @@ riichi-проекты группируют уже известное игров�
 Generic rectangles недостаточно, чтобы отличить руку, сброс и стену одинаковой
 геометрии. Поэтому semantic grouping объединяет локальную scale-normalized
 геометрию, face/back evidence существующего LiteRT и направление игрока из
-capture protocol. Перед grouping видимая плоскость стола автоматически
-выделяется по dominant surface color и homography переводит detections в
-канонический вид сверху; фото-координаты используются только для отрисовки.
+capture protocol. Перед grouping сцена нормализуется по крайним детекциям: это
+не зависит от центра кадра и не принимает обрезанный круглый стол за
+четырёхугольник. Полная homography оставлена до появления разметки ключевых
+точек: выдуманная перспектива на текущих фото сращивала руки и сбросы.
 Микро-зоны растут от уверенных hand/wall/dora/discard seeds, а proposals вне
 плоскости или spatial support попадают в `noise`. Индикатор доры отделяется
 от спинок мёртвой стены; для маленькой стены доступен резервный contrast score.
-Обратная homography рисует зоны перспективными полигонами, а `noise` в
-итоговый overlay не выводится. Opponent hands назначаются до discard: закрытые
+Преобразование сцены рисует зоны обратно на фото, а `noise` в итоговый overlay
+не выводится. Opponent hands назначаются до discard: закрытые
 фрагменты срастаются вдоль края стола, открытая линейная группа рядом со стеной
 имеет приоритет над discard, а wall остаётся внутренней back-only линией.
 Официальный

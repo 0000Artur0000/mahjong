@@ -120,9 +120,10 @@ PYTHONPATH=vision/src:. python3 vision/scripts/layout_preview.py \
   /path/to/images /path/to/output
 ```
 
-The command estimates the table plane, applies face fallback only inside wall
-zones, groups every accepted tile and writes fresh perspective overlays plus
-`groups.json`. `noise` and unresolved groups are intentionally not drawn.
+The command normalizes the scene from the detected tile extent, applies face
+fallback only inside wall zones, groups every accepted tile and writes fresh
+overlays plus `groups.json`. `noise` and unresolved groups are intentionally
+not drawn.
 
 ## Real-photo review gate
 

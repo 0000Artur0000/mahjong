@@ -6,6 +6,8 @@ from statistics import median, pstdev
 
 MAX_TILES = 256
 MAX_DISCARD_ROW_TILES = 6
+# §7: канов максимум четыре, значит индикаторов доры не больше пяти.
+DORA_MAX_TILES = 5
 
 
 @dataclass(frozen=True)
@@ -29,13 +31,12 @@ class TableFrame:
                 or not all(
                     not isinstance(value, bool)
                     and isfinite(value)
-                    and 0 <= value <= 1
                     for value in point
                 )
                 for point in self.corners
             )
         ):
-            raise ValueError("table corners must be normalized TL, TR, BR, BL")
+            raise ValueError("table corners must be finite TL, TR, BR, BL")
         crosses = [
             (second[0] - first[0]) * (third[1] - second[1])
             - (second[1] - first[1]) * (third[0] - second[0])
@@ -145,7 +146,6 @@ class LayoutParams:
     min_samples: int = 2
     hand_min_tiles: int = 3
     hand_max_tiles: int = 18
-    hand_max_rows: int = 3
     hand_merge_gap_k: float = 3.0
     discard_min_tiles: int = 2
     discard_outlier_k: float = 2.25
@@ -174,7 +174,6 @@ class LayoutParams:
             or self.eps_k <= 0
             or not 1 <= self.min_samples <= MAX_TILES
             or not 1 <= self.hand_min_tiles <= self.hand_max_tiles
-            or self.hand_max_rows < 1
             or self.hand_merge_gap_k <= 0
             or self.discard_min_tiles < 1
             or self.discard_outlier_k <= 0
@@ -449,6 +448,28 @@ def _assign_roles(
         for cluster in clusters
         for tile in cluster.tiles
     )
+    for cluster in tuple(clusters):
+        faces = tuple(
+            tile
+            for tile in cluster.tiles
+            if (tile.face_score or 0) >= params.face_threshold
+        )
+        backs = tuple(tile for tile in cluster.tiles if tile not in faces)
+        if (
+            len(faces) >= params.discard_min_tiles
+            and len(backs) >= params.dead_wall_min_tiles
+        ):
+            face_cluster = _describe(faces, frame)
+            back_cluster = _describe(backs, frame)
+            if (
+                hypot(
+                    face_cluster.centroid[0] - back_cluster.centroid[0],
+                    face_cluster.centroid[1] - back_cluster.centroid[1],
+                )
+                >= 0.6 * max(face_cluster.scale, back_cluster.scale)
+            ):
+                clusters.remove(cluster)
+                clusters.extend((face_cluster, back_cluster))
     if frame:
         for cluster in clusters:
             if not (
@@ -516,17 +537,12 @@ def _assign_roles(
         or not any(tile.face_score is not None for tile in cluster.tiles)
         or _face_count(cluster, params.face_threshold) > 0
     ]
-    hand_groups = [
-        parts
-        for parts in _components(
-            hand_candidates,
-            params.hand_merge_gap_k,
-            radial_direction=direction,
-        )
-        if sum(cluster.tile_count for cluster in parts) >= params.hand_min_tiles
-        and _merged(parts, frame).rows <= params.hand_max_rows
-    ]
     hand = None
+    hand_groups = _components(
+        hand_candidates,
+        params.hand_merge_gap_k,
+        radial_direction=direction,
+    )
     if hand_groups:
         parts = max(
             hand_groups,
@@ -537,9 +553,34 @@ def _assign_roles(
                 / 2
             ),
         )
-        hand = _replace(
-            clusters, parts, "hand", frame=frame, seat="self"
-        )
+        if sum(part.tile_count for part in parts) > params.hand_max_tiles:
+            bounded = []
+            for part in sorted(
+                parts,
+                key=lambda cluster: _projection(cluster.centroid, direction),
+                reverse=True,
+            ):
+                if (
+                    part.tile_count <= params.hand_max_tiles
+                    - sum(cluster.tile_count for cluster in bounded)
+                    and (
+                        not bounded
+                        or len(
+                            _components(
+                                [*bounded, part],
+                                params.hand_merge_gap_k,
+                                radial_direction=direction,
+                            )
+                        )
+                        == 1
+                    )
+                ):
+                    bounded.append(part)
+            parts = bounded
+        if sum(part.tile_count for part in parts) >= params.hand_min_tiles:
+            hand = _replace(
+                clusters, parts, "hand", frame=frame, seat="self"
+            )
 
     available = [cluster for cluster in clusters if cluster.role == "other"]
     if not available:
@@ -698,15 +739,6 @@ def _assign_roles(
         and cluster.tile_count >= params.discard_min_tiles
         and _face_count(cluster, params.face_threshold) > 0
     ]
-    if frame:
-        for cluster in discard_candidates:
-            if not 0.1 <= cluster.centroid[0] <= 0.9:
-                cluster.role = "noise"
-        discard_candidates = [
-            cluster
-            for cluster in discard_candidates
-            if cluster.role == "other"
-        ]
     if discard_candidates:
         discard_center = _center(discard_candidates)
         distances = [
@@ -721,12 +753,43 @@ def _assign_roles(
             params.hand_merge_gap_k
             * median(cluster.scale for cluster in discard_candidates),
         )
+        inliers = [
+            cluster
+            for cluster, distance in zip(
+                discard_candidates, distances, strict=True
+            )
+            if distance <= limit
+        ]
+        tangent = -direction[1], direction[0]
+        radial = (
+            min(inliers, key=lambda cluster: _projection(cluster.centroid, direction)),
+            max(inliers, key=lambda cluster: _projection(cluster.centroid, direction)),
+        )
+        sideways = (
+            min(inliers, key=lambda cluster: _projection(cluster.centroid, tangent)),
+            max(inliers, key=lambda cluster: _projection(cluster.centroid, tangent)),
+        )
+        radial_span = abs(
+            _projection(radial[1].centroid, direction)
+            - _projection(radial[0].centroid, direction)
+        )
+        radial_skew = abs(
+            _projection(radial[1].centroid, tangent)
+            - _projection(radial[0].centroid, tangent)
+        )
+        opposite = radial if radial_span >= radial_skew / 2 else sideways
+        seat_center = (
+            (opposite[0].centroid[0] + opposite[1].centroid[0]) / 2,
+            (opposite[0].centroid[1] + opposite[1].centroid[1]) / 2,
+        )
         for cluster, distance in zip(
             discard_candidates, distances, strict=True
         ):
             if distance <= limit:
                 cluster.seat = _seat(
-                    cluster.centroid, discard_center, directions
+                    cluster.centroid,
+                    seat_center,
+                    directions,
                 )
                 cluster.role, cluster.heuristic_score = (
                     "discard",
@@ -734,6 +797,7 @@ def _assign_roles(
                 )
             else:
                 cluster.role = "noise"
+    _enforce_table_structure(clusters, directions, center, frame, params)
     return hand, dead_wall
 
 
@@ -972,6 +1036,71 @@ def _components(
                 remaining.remove(neighbor)
         groups.append(group)
     return groups
+
+
+def _enforce_table_structure(
+    clusters: list[Cluster],
+    directions: dict[str, tuple[float, float]],
+    center: tuple[float, float],
+    frame: TableFrame | None,
+    params: LayoutParams,
+) -> None:
+    """Свести результат к тому, что физически возможно на столе.
+
+    Правила задают структуру жёстче любой эвристики:
+
+    - §5: каждый игрок сбрасывает **в свой дискард**, и принадлежность сбросов
+      обязана оставаться видимой. Значит сбросов не больше четырёх, по одному на
+      место. Семь групп сброса означают, что кластеризация разорвала пул, а не
+      что сбросов семь.
+    - §4.2 и §7: мёртвая стена одна, в ней 14 тайлов; первый индикатор доры —
+      третий сверху от края, каждый кан открывает следующий. Канов максимум
+      четыре, поэтому дора — один ряд длиной от одного до пяти тайлов.
+
+    Разорванные сбросы одного игрока сливаются; лишние wall/dora остаются
+    нерешёнными, чтобы не выдавать физически невозможную структуру.
+    """
+
+    by_seat: dict[str | None, list[Cluster]] = {}
+    for cluster in [c for c in clusters if c.role == "discard"]:
+        seat = cluster.seat or _seat(cluster.centroid, center, directions)
+        by_seat.setdefault(seat, []).append(cluster)
+    for seat, parts in by_seat.items():
+        if len(parts) > 1:
+            _replace(clusters, parts, "discard", frame=frame, seat=seat)
+        else:
+            parts[0].seat = seat
+
+    by_seat = {}
+    for cluster in [c for c in clusters if c.role == "opponent_hand"]:
+        by_seat.setdefault(cluster.seat, []).append(cluster)
+    for seat, parts in by_seat.items():
+        if len(parts) <= 1:
+            continue
+        if sum(part.tile_count for part in parts) <= params.hand_max_tiles:
+            _replace(clusters, parts, "opponent_hand", frame=frame, seat=seat)
+
+    walls = sorted(
+        (cluster for cluster in clusters if cluster.role == "wall"),
+        key=lambda cluster: cluster.tile_count,
+        reverse=True,
+    )
+    for wall in walls[:4]:
+        wall.seat = _seat(wall.centroid, center, directions)
+    for extra in walls[4:]:
+        extra.role, extra.seat = "other", None
+
+    doras = sorted(
+        (cluster for cluster in clusters if cluster.role == "dora"),
+        key=lambda cluster: cluster.tile_count,
+        reverse=True,
+    )
+    # Дора всегда в одном месте: вторую не выдумываем, а возвращаем в нерешённые.
+    for extra in doras[1:]:
+        extra.role, extra.seat = "other", None
+    for cluster in clusters:
+        if cluster.role == "dora" and not 1 <= cluster.tile_count <= DORA_MAX_TILES:
+            cluster.role, cluster.seat = "other", None
 
 
 def _merged(

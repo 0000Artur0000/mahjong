@@ -113,3 +113,104 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def propose_back_tiles(
+    image,
+    corners,
+    detections,
+    *,
+    colour_distance: float = 14.0,
+    min_tiles: float = 0.6,
+    max_tiles: float = 30.0,
+):
+    """Найти тайлы, которых не увидел детектор: рубашки чужого цвета.
+
+    Признак общий, без привязки к синему: однородная область **внутри плоскости
+    стола**, чей цвет в LAB отстоит от цвета самого стола дальше порога и которую
+    не закрыл ни один детектированный бокс. Область режется на тайлы шагом,
+    взятым из медианного размера уже найденных, — стена это ряд одинаковых тайлов.
+
+    Возвращает список `Proposal`; пустой список, если предлагать нечего.
+    """
+
+    import numpy as np
+
+    from dorahub_vision.backs import Proposal, covered, split_run, tile_size
+
+    if not detections:
+        return []
+    height, width = image.shape[:2]
+    tile_width, tile_height = tile_size(detections)
+    unit = max(1.0, tile_width * width * tile_height * height)
+
+    # Только каналы a/b: тени, блики, бумага и тёмный телефон отличаются от стола
+    # яркостью, а рубашка тайла — цветом. По полному LAB они неразличимы.
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB).astype(np.float32)[:, :, 1:]
+    table_mask = np.zeros((height, width), np.uint8)
+    polygon = np.array(
+        [(round(x * (width - 1)), round(y * (height - 1))) for x, y in corners],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(table_mask, [polygon], 255)
+
+    sample = lab[table_mask > 0]
+    if sample.size == 0:
+        return []
+    table_colour = np.median(sample, axis=0)
+    distance = np.linalg.norm(lab - table_colour, axis=2)
+
+    occupied = np.zeros((height, width), np.uint8)
+    for cx, cy, box_width, box_height in detections:
+        cv2.rectangle(
+            occupied,
+            (round((cx - box_width / 2) * width), round((cy - box_height / 2) * height)),
+            (round((cx + box_width / 2) * width), round((cy + box_height / 2) * height)),
+            255,
+            -1,
+        )
+
+    mask = ((distance > colour_distance) & (table_mask > 0) & (occupied == 0)).astype(
+        np.uint8
+    ) * 255
+    kernel = max(3, round(tile_height * height * 0.3)) | 1
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel, kernel))
+    )
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel, kernel)),
+    )
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    proposals: list[Proposal] = []
+    for index in range(1, count):
+        area = stats[index, cv2.CC_STAT_AREA]
+        tiles = area / unit
+        if not min_tiles <= tiles <= max_tiles:
+            continue
+        points = cv2.findNonZero((labels == index).astype(np.uint8))
+        (rect_cx, rect_cy), (rect_w, rect_h), angle = cv2.minAreaRect(points)
+        # Заполненность считаем по повёрнутому прямоугольнику: ряд тайлов лежит
+        # под углом, и осевая рамка у него заполнена лишь наполовину.
+        if rect_w * rect_h <= 0 or area < 0.6 * rect_w * rect_h:
+            continue
+        length, thickness = max(rect_w, rect_h), min(rect_w, rect_h)
+        radians = np.deg2rad(angle if rect_w >= rect_h else angle + 90)
+        step = tile_width * width if rect_w >= rect_h else tile_height * height
+        for proposal in split_run(
+            rect_cx / width,
+            rect_cy / height,
+            length / width if abs(np.cos(radians)) > abs(np.sin(radians)) else length / height,
+            thickness / height,
+            float(radians),
+            (step / width) if abs(np.cos(radians)) > abs(np.sin(radians)) else (step / height),
+        ):
+            if not covered(
+                (proposal.cx, proposal.cy, proposal.width, proposal.height),
+                detections,
+                slack=0.6 * max(tile_width, tile_height),
+            ):
+                proposals.append(proposal)
+    return proposals

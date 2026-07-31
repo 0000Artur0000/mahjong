@@ -208,6 +208,36 @@ def predict_all_tiles(
         return _generic_tiles(detections, image.size)
 
 
+def predict_faces(
+    model_path: Path,
+    image_path: Path,
+    *,
+    confidence: float = 0.1,
+    iou_threshold: float = 0.3,
+) -> list[dict[str, object]]:
+    """Номиналы по всему кадру: те же 12 регионов, но классы сохраняются.
+
+    Отличается от `--all-tiles` только тем, что не схлопывает результат в единый
+    label `tile`. Именно этот режим даёт `face-predictions.json` для группировки:
+    один проход по всему кадру находит единицы лиц, тайлинг — десятки.
+    """
+
+    return _nms(
+        [
+            detection
+            for region in FULL_FIELD_REGIONS
+            for detection in predict(
+                model_path,
+                image_path,
+                confidence=confidence,
+                iou_threshold=iou_threshold,
+                region=region,
+            )
+        ],
+        iou_threshold,
+    )
+
+
 def _generic_tiles(
     detections: list[dict[str, object]],
     image_size: tuple[int, int],
@@ -278,12 +308,21 @@ def main() -> None:
     parser.add_argument("model", type=Path)
     parser.add_argument("images", type=Path, nargs="+")
     parser.add_argument("--confidence", type=float, default=0.2)
+    parser.add_argument("--iou", type=float, default=0.3)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--nearest-hand", action="store_true")
     mode.add_argument("--all-tiles", action="store_true")
+    mode.add_argument("--faces", action="store_true")
     args = parser.parse_args()
     for image in args.images:
-        if args.all_tiles:
+        if args.faces:
+            detections = predict_faces(
+                args.model,
+                image,
+                confidence=args.confidence,
+                iou_threshold=args.iou,
+            )
+        elif args.all_tiles:
             detections = predict_all_tiles(
                 args.model,
                 image,

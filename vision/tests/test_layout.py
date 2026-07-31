@@ -75,6 +75,18 @@ class LayoutTest(unittest.TestCase):
             0,
         )
 
+    def test_rectifies_a_table_cropped_by_the_photo(self) -> None:
+        corners = ((-0.2, -0.1), (1.1, 0.0), (1.2, 1.1), (-0.1, 1.0))
+        frame = TableFrame(corners)
+
+        for actual, expected in zip(
+            (frame.map(*point) for point in corners),
+            ((0, 0), (1, 0), (1, 1), (0, 1)),
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual[0], expected[0], places=6)
+            self.assertAlmostEqual(actual[1], expected[1], places=6)
+
     def test_clusters_hand_and_keeps_ambiguous_group_unassigned(self) -> None:
         result = cluster_layout(row(0.85, 0.10, 13) + row(0.25, 0.55, 5))
 
@@ -263,7 +275,7 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(result.opponent_hands[0].seat, "opposite")
         self.assertEqual(sum(group.tile_count for group in result.discards), 12)
 
-    def test_opponent_hands_outrank_walls_and_edge_noise(self) -> None:
+    def test_opponent_hands_outrank_walls_without_image_edge_hardcode(self) -> None:
         own = [
             TileBox(0.15 + index * 0.045, 0.85, 0.035, 0.055, face_score=1)
             for index in range(14)
@@ -323,7 +335,6 @@ class LayoutTest(unittest.TestCase):
             [7, 9, 12],
         )
         self.assertIn(15, [group.tile_count for group in result.walls])
-        self.assertEqual([group.tile_count for group in result.noise], [2])
 
     def test_separates_open_melds_from_a_nine_tile_discard_row(self) -> None:
         own = [
@@ -368,13 +379,56 @@ class LayoutTest(unittest.TestCase):
 
         self.assertEqual(result.hand.tile_count, 13)
 
+    def test_missing_right_discard_does_not_shift_self_to_the_right(self) -> None:
+        hand = [
+            TileBox(0.15 + index * 0.045, 0.9, 0.035, 0.055, face_score=1)
+            for index in range(14)
+        ]
+
+        def discard(x: float, y: float, columns: int, rows: int) -> list[TileBox]:
+            return [
+                TileBox(
+                    tile.cx,
+                    tile.cy,
+                    tile.width,
+                    tile.height,
+                    face_score=1,
+                )
+                for tile in grid(
+                    x,
+                    y,
+                    columns,
+                    rows,
+                    width=0.025,
+                    height=0.04,
+                    step_x=0.03,
+                    step_y=0.045,
+                )
+            ]
+
+        result = cluster_layout(
+            hand
+            + discard(0.46, 0.55, 3, 2)
+            + discard(0.46, 0.25, 3, 2)
+            + discard(0.20, 0.38, 2, 3),
+            LayoutParams(
+                player_direction=(0, 1),
+                table_corners=((0, 0), (1, 0), (1, 1), (0, 1)),
+            ),
+        )
+
+        self.assertEqual(
+            {cluster.seat for cluster in result.discards},
+            {"self", "opposite", "left"},
+        )
+
     def test_overdetected_nearest_hand_does_not_select_an_opponent(self) -> None:
         near = row(0.88, 0.02, 20)
         opponent = row(0.20, 0.15, 13)
 
         result = cluster_layout(near + opponent)
 
-        self.assertEqual(result.hand.tile_count, 20)
+        self.assertIsNone(result.hand)
 
 
 if __name__ == "__main__":
