@@ -7,20 +7,21 @@ import cv2
 import numpy as np
 
 from dorahub_vision.layout import TileBox
-from vision.scripts.layout_preview import _tile_prism, render_predictions
+from vision.scripts.layout_preview import _tile_outline, render_predictions
 
 
 class LayoutPreviewTest(unittest.TestCase):
-    def test_builds_a_visible_prism_for_each_tile(self) -> None:
-        face, back, sides = _tile_prism(
-            TileBox(0.5, 0.5, 0.1, 0.2),
+    def test_prefers_a_segmented_tile_silhouette(self) -> None:
+        tile = TileBox(0.5, 0.5, 0.1, 0.2)
+        polygon = np.array(((10, 20), (30, 15), (35, 50), (12, 55)))
+
+        actual = _tile_outline(
+            tile,
             (200, 300, 3),
-            (150, 20),
+            {(tile.cx, tile.cy, tile.width, tile.height): polygon},
         )
 
-        self.assertEqual(face.shape, (4, 2))
-        self.assertTrue(np.all(back[:, 1] < face[:, 1]))
-        self.assertEqual(len(sides), 4)
+        np.testing.assert_array_equal(actual, polygon)
 
     def test_renders_real_cli_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

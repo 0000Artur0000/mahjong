@@ -13,7 +13,6 @@ from dorahub_vision.quad import quad_from_points
 from dorahub_vision.layout import (
     Cluster,
     LayoutParams,
-    TableFrame,
     TileBox,
     cluster_layout,
 )
@@ -36,6 +35,7 @@ def render_predictions(
     face_predictions_path: Path,
     image_root: Path,
     output: Path,
+    mask_predictions_path: Path | None = None,
 ) -> list[Path]:
     predictions = json.loads(predictions_path.read_text())
     countgd = isinstance(predictions, dict)
@@ -53,6 +53,14 @@ def render_predictions(
         else {
             Path(item["image"]).name: item["detections"]
             for item in json.loads(face_predictions_path.read_text())
+        }
+    )
+    mask_predictions = (
+        {}
+        if mask_predictions_path is None
+        else {
+            Path(item["image"]).name: item["detections"]
+            for item in json.loads(mask_predictions_path.read_text())
         }
     )
     output.mkdir(parents=True, exist_ok=True)
@@ -107,7 +115,9 @@ def render_predictions(
             )
 
         faces = face_predictions.get(image_path.name, ())
+        masks = mask_predictions.get(image_path.name, ())
         boxes = []
+        tile_polygons = {}
         for detection in detections:
             matched = max(
                 (
@@ -139,6 +149,23 @@ def render_predictions(
                     box.angle,
                 )
             boxes.append(box)
+            matched_mask = max(
+                (
+                    mask
+                    for mask in masks
+                    if _iou(
+                        detection["box"],
+                        _normalized_xyxy(mask["box"], image.shape),
+                    )
+                    >= 0.5
+                ),
+                key=lambda mask: mask.get("score", mask.get("sam_score", 0)),
+                default=None,
+            )
+            if matched_mask and len(matched_mask.get("polygon", ())) >= 3:
+                tile_polygons[_tile_key(box)] = np.asarray(
+                    matched_mask["polygon"], dtype=np.int32
+                )
         layout = cluster_layout(boxes, params)
         fallback = set() if faces else {
             tile
@@ -175,8 +202,7 @@ def render_predictions(
             ]
             layout = cluster_layout(boxes, params)
 
-        frame = TableFrame(corners)
-        preview = _draw(image, frame, layout.clusters)
+        preview = _draw(image, layout.clusters, tile_polygons)
         target = output / f"{image_path.stem}.jpg"
         if not cv2.imwrite(str(target), preview):
             raise ValueError(f"cannot write {target}")
@@ -226,39 +252,39 @@ def render_predictions(
 
 def _draw(
     image: np.ndarray,
-    frame: TableFrame,
     clusters: Iterable[Cluster],
+    tile_polygons: dict[tuple[float, ...], np.ndarray],
 ) -> np.ndarray:
     clusters = tuple(clusters)
-    height, width = image.shape[:2]
-    center = frame.unmap(0.5, 0.5)
-    table_center = center[0] * width, center[1] * height
     tile_shapes = []
     tile_fill = image.copy()
     for cluster in clusters:
         color = COLORS.get(cluster.role, (160, 160, 160))
-        shade = tuple(round(channel * 0.45) for channel in color)
         for tile in cluster.tiles:
-            face, back, sides = _tile_prism(tile, image.shape, table_center)
-            cv2.fillPoly(tile_fill, [back, *sides], shade)
-            cv2.fillPoly(tile_fill, [face], color)
-            tile_shapes.append((face, back, color, shade))
-    preview = cv2.addWeighted(tile_fill, 0.4, image, 0.6, 0)
+            polygon = _tile_outline(tile, image.shape, tile_polygons)
+            cv2.fillPoly(tile_fill, [polygon], color)
+            tile_shapes.append((polygon, color))
+    preview = cv2.addWeighted(tile_fill, 0.25, image, 0.75, 0)
     del tile_fill
-    for face, back, color, shade in tile_shapes:
-        cv2.polylines(preview, [back], True, shade, 2, cv2.LINE_AA)
-        cv2.polylines(preview, [face], True, color, 3, cv2.LINE_AA)
-        for start, end in zip(face, back, strict=True):
-            cv2.line(preview, tuple(start), tuple(end), shade, 2, cv2.LINE_AA)
+    for polygon, color in tile_shapes:
+        cv2.polylines(preview, [polygon], True, color, 2, cv2.LINE_AA)
     return preview
 
 
-def _tile_prism(
+def _tile_key(tile: TileBox) -> tuple[float, ...]:
+    return tile.cx, tile.cy, tile.width, tile.height
+
+
+def _tile_outline(
     tile: TileBox,
     image_shape: tuple[int, ...],
-    table_center: tuple[float, float],
-) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
-    """Return a perspective-looking prism around one detected tile."""
+    polygons: dict[tuple[float, ...], np.ndarray],
+) -> np.ndarray:
+    """Use the segmented silhouette; never invent unavailable 3-D edges."""
+
+    segmented = polygons.get(_tile_key(tile))
+    if segmented is not None:
+        return segmented
 
     height, width = image_shape[:2]
     box_width, box_height = tile.width * width, tile.height * height
@@ -266,32 +292,24 @@ def _tile_prism(
     angle = degrees(tile.angle) if tile.angle is not None else (
         90 if box_height > box_width else 0
     )
-    face = np.rint(
+    return np.rint(
         cv2.boxPoints(
             ((tile.cx * width, tile.cy * height), (major, minor), angle)
         )
     ).astype(np.int32)
-    dx = table_center[0] - tile.cx * width
-    dy = table_center[1] - tile.cy * height
-    distance = hypot(dx, dy) or 1
-    depth = max(4, min(30, round(minor * 0.35)))
-    offset = np.rint((dx / distance * depth, dy / distance * depth)).astype(
-        np.int32
-    )
-    back = face + offset
-    sides = [
-        np.array(
-            [
-                face[index],
-                face[(index + 1) % 4],
-                back[(index + 1) % 4],
-                back[index],
-            ],
-            dtype=np.int32,
-        )
-        for index in range(4)
+
+
+def _normalized_xyxy(
+    box: list[float], image_shape: tuple[int, ...]
+) -> list[float]:
+    height, width = image_shape[:2]
+    left, top, right, bottom = box
+    return [
+        (left + right) / (2 * width),
+        (top + bottom) / (2 * height),
+        (right - left) / width,
+        (bottom - top) / height,
     ]
-    return face, back, sides
 
 
 def _countgd_detections(
@@ -366,12 +384,14 @@ def main() -> None:
     parser.add_argument("face_predictions", type=Path)
     parser.add_argument("image_root", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--masks", type=Path)
     args = parser.parse_args()
     for path in render_predictions(
         args.predictions,
         args.face_predictions,
         args.image_root,
         args.output,
+        args.masks,
     ):
         print(path)
 
