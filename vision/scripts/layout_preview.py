@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterable
 from math import atan2, degrees, hypot
 from pathlib import Path
+from statistics import median
 
 import cv2
 import numpy as np
@@ -13,6 +14,7 @@ from dorahub_vision.quad import quad_from_points
 from dorahub_vision.layout import (
     Cluster,
     LayoutParams,
+    TableFrame,
     TileBox,
     cluster_layout,
 )
@@ -26,7 +28,7 @@ COLORS = {
     "hand": (118, 230, 0),
     "opponent_hand": (3, 255, 118),
     "wall": (255, 176, 0),
-    "dead_wall": (249, 0, 213),
+    "dead_wall": (255, 80, 0),
     "dora": (255, 0, 255),
     "discard": (0, 171, 255),
 }
@@ -202,6 +204,7 @@ def render_predictions(
             ]
             layout = cluster_layout(boxes, params)
 
+        frame = TableFrame(corners)
         preview = _draw(image, layout.clusters, tile_polygons)
         target = output / f"{image_path.stem}.jpg"
         if not cv2.imwrite(str(target), preview):
@@ -212,6 +215,7 @@ def render_predictions(
                 "image": image_path.name,
                 "tableCorners": corners,
                 "plane": plane,
+                "sceneTiles": _scene_tiles(layout.clusters, frame),
                 "melds": [
                     {
                         "kind": meld.kind,
@@ -269,6 +273,48 @@ def _draw(
     for polygon, color in tile_shapes:
         cv2.polylines(preview, [polygon], True, color, 2, cv2.LINE_AA)
     return preview
+
+
+def _scene_tiles(
+    clusters: Iterable[Cluster], frame: TableFrame
+) -> list[dict[str, object]]:
+    scene = []
+    for group, cluster in enumerate(clusters):
+        points = [frame.map(tile.cx, tile.cy) for tile in cluster.tiles]
+        across = [
+            -x * cluster.axis[1] + y * cluster.axis[0] for x, y in points
+        ]
+        middle = median(across)
+        for tile, (x, y), level in zip(
+            cluster.tiles, points, across, strict=True
+        ):
+            z = (
+                int(level > middle)
+                if cluster.role in {"wall", "dead_wall"} and cluster.rows > 1
+                else int(cluster.role == "dora")
+            )
+            scene.append(
+                {
+                    "position": [round(x, 4), round(y, 4), z],
+                    "yaw": round(atan2(cluster.axis[1], cluster.axis[0]), 4),
+                    "role": cluster.role,
+                    "seat": cluster.seat,
+                    "group": group,
+                    "face": (
+                        MODEL_TILES[tile.class_id]
+                        if tile.class_id is not None
+                        and tile.class_id < len(MODEL_TILES)
+                        else None
+                    ),
+                    "box": [
+                        round(tile.cx, 4),
+                        round(tile.cy, 4),
+                        round(tile.width, 4),
+                        round(tile.height, 4),
+                    ],
+                }
+            )
+    return scene
 
 
 def _tile_key(tile: TileBox) -> tuple[float, ...]:

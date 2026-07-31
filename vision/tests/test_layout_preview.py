@@ -31,7 +31,19 @@ class LayoutPreviewTest(unittest.TestCase):
             predictions = root / "predictions.json"
             faces = root / "faces.json"
             predictions.write_text(
-                json.dumps([{"image": image.name, "detections": []}])
+                json.dumps(
+                    [
+                        {
+                            "image": image.name,
+                            "detections": [
+                                {
+                                    "box": [0.5, 0.5, 0.2, 0.3],
+                                    "confidence": 0.9,
+                                }
+                            ],
+                        }
+                    ]
+                )
             )
             faces.write_text(
                 json.dumps([{"image": image.name, "detections": []}])
@@ -47,6 +59,11 @@ class LayoutPreviewTest(unittest.TestCase):
             self.assertEqual(len(rendered), 1)
             self.assertTrue(rendered[0].is_file())
             self.assertTrue((root / "output/groups.json").is_file())
+            scene = json.loads((root / "output/groups.json").read_text())[0][
+                "sceneTiles"
+            ]
+            self.assertEqual(len(scene), 1)
+            self.assertEqual(len(scene[0]["position"]), 3)
 
     def test_accepts_countgd_polygons_without_a_face_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
