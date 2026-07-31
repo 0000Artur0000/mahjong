@@ -533,24 +533,6 @@ def _assign_roles(
     if dead_wall is not None:
         dead_wall.role = "dead_wall"
 
-    dora = min(
-        (
-            cluster
-            for cluster in clusters
-            if cluster.role == "other"
-            and 2 <= cluster.tile_count <= 5
-            and _back_fraction(cluster, params.face_threshold) > 0.5
-            and _face_count(cluster, params.face_threshold) > 0
-            and walls
-            and min(_cluster_gap(cluster, wall) for wall in walls)
-            <= 4 * max(cluster.scale, median(wall.scale for wall in walls))
-        ),
-        key=lambda cluster: min(_cluster_gap(cluster, wall) for wall in walls),
-        default=None,
-    )
-    if dora is not None:
-        dora.role = "dora"
-
     direction = _normalize(
         params.player_direction or _infer_player_direction(clusters)
     )
@@ -744,11 +726,6 @@ def _assign_roles(
                 seat=seat,
             )
 
-    if dead_wall is not None:
-        _, dead_wall = _split_dead_wall_dora(
-            clusters, dead_wall, params, frame
-        )
-
     _promote_edge_hands(
         clusters,
         params,
@@ -823,6 +800,8 @@ def _assign_roles(
             else:
                 cluster.role = "noise"
     _enforce_table_structure(clusters, directions, center, frame, params)
+    dead_wall = _extract_embedded_dora(clusters, params, frame)
+    hand = next((cluster for cluster in clusters if cluster.role == "hand"), None)
     return hand, dead_wall
 
 
@@ -1095,44 +1074,115 @@ def _opponent_edge(point: tuple[float, float]) -> tuple[str, float]:
     return seat, distances[seat]
 
 
-def _split_dead_wall_dora(
+def _extract_embedded_dora(
     clusters: list[Cluster],
-    dead_wall: Cluster,
     params: LayoutParams,
     frame: TableFrame | None,
-) -> tuple[Cluster | None, Cluster]:
-    faces = tuple(
+) -> Cluster | None:
+    """Find class-confirmed face tiles embedded in a line of wall backs."""
+
+    for cluster in clusters:
+        if cluster.role == "dora":
+            cluster.role = "other"
+        elif cluster.role == "dead_wall":
+            cluster.role = "wall"
+
+    tiles = tuple(tile for cluster in clusters for tile in cluster.tiles)
+    faces = [
         tile
-        for tile in dead_wall.tiles
-        if tile.face_score is not None
+        for tile in tiles
+        if tile.class_id is not None
+        and tile.face_score is not None
         and tile.face_score >= params.face_threshold
-    )
-    backs = tuple(tile for tile in dead_wall.tiles if tile not in faces)
-    if not faces or len(backs) < 2:
-        return None, dead_wall
-    back_wall = _describe(backs, frame)
-    dora_tiles = tuple(
+    ]
+    backs = [
         tile
-        for tile in faces
-        if _axis_distance(_point(tile, frame), back_wall)
-        <= 0.7 * back_wall.scale
+        for tile in tiles
+        if tile.face_score is not None
+        and tile.face_score < params.face_threshold
+    ]
+    candidates: list[tuple[tuple[float, ...], TileBox, Cluster]] = []
+    for face in faces:
+        point = _point(face, frame)
+        scale = _tile_scale(face, frame)
+        support = tuple(
+            back
+            for back in backs
+            if 0.4 <= _tile_scale(back, frame) / scale <= 2.5
+            and hypot(
+                _point(back, frame)[0] - point[0],
+                _point(back, frame)[1] - point[1],
+            )
+            <= 3 * max(scale, _tile_scale(back, frame))
+        )
+        if len(support) < params.dead_wall_min_tiles:
+            continue
+        wall = _describe(support, frame)
+        along = [_projection(_point(back, frame), wall.axis) for back in support]
+        face_along = _projection(point, wall.axis)
+        distance = _axis_distance(point, wall) / wall.scale
+        if (
+            wall.rows <= 2
+            and wall.linearity >= 0.7
+            and distance <= 0.9
+            and min(along) <= face_along <= max(along)
+        ):
+            candidates.append(
+                (
+                    (
+                        wall.linearity,
+                        -distance,
+                        min(len(support), params.dead_wall_max_tiles),
+                        face.face_score or 0,
+                    ),
+                    face,
+                    wall,
+                )
+            )
+    if not candidates:
+        return None
+
+    _, _, wall = max(candidates, key=lambda candidate: candidate[0])
+    support = {
+        back
+        for back in backs
+        if _axis_distance(_point(back, frame), wall) <= 0.9 * wall.scale
+    }
+    dora_tiles = tuple(
+        candidate[1]
+        for candidate in sorted(candidates, reverse=True, key=lambda item: item[0])
+        if support.intersection(candidate[2].tiles)
+    )[:DORA_MAX_TILES]
+    wall_tiles = tuple(
+        sorted(
+            support,
+            key=lambda tile: min(
+                hypot(
+                    _point(tile, frame)[0] - _point(dora, frame)[0],
+                    _point(tile, frame)[1] - _point(dora, frame)[1],
+                )
+                for dora in dora_tiles
+            ),
+        )[: params.dead_wall_max_tiles - len(dora_tiles)]
     )
-    if not dora_tiles:
-        return None, dead_wall
+    selected = {*dora_tiles, *wall_tiles}
+    updated: list[Cluster] = []
+    for cluster in clusters:
+        leftovers = tuple(tile for tile in cluster.tiles if tile not in selected)
+        if not leftovers:
+            continue
+        replacement = _describe(leftovers, frame)
+        replacement.role = cluster.role
+        replacement.seat = cluster.seat
+        replacement.heuristic_score = cluster.heuristic_score
+        updated.append(replacement)
+
+    dead_wall = _describe(wall_tiles, frame)
+    dead_wall.role = "dead_wall"
     dora = _describe(dora_tiles, frame)
     dora.role = "dora"
-    back_wall.role = "dead_wall"
-    back_wall.heuristic_score = dead_wall.heuristic_score
-    leftovers = tuple(tile for tile in faces if tile not in dora_tiles)
-    clusters[:] = [
-        back_wall if cluster is dead_wall else cluster
-        for cluster in clusters
-    ]
-    clusters.append(dora)
-    if leftovers:
-        clusters.append(_describe(leftovers, frame))
-    return dora, back_wall
-
+    clusters[:] = [dead_wall, dora, *updated]
+    return dead_wall
 
 def _axis_distance(point: tuple[float, float], cluster: Cluster) -> float:
     x = point[0] - cluster.centroid[0]

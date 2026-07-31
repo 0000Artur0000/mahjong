@@ -138,7 +138,7 @@ def render_predictions(
                 face_score=matched["confidence"] if matched else 0.0,
                 angle=detection.get("angle"),
             )
-            if countgd and matched is None:
+            if countgd and not faces:
                 box = TileBox(
                     box.cx,
                     box.cy,
@@ -150,7 +150,7 @@ def render_predictions(
                 )
             boxes.append(box)
         layout = cluster_layout(boxes, params)
-        fallback = {
+        fallback = set() if faces else {
             tile
             for wall in layout.walls
             if (

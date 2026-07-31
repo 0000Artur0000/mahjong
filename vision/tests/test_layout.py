@@ -149,6 +149,7 @@ class LayoutTest(unittest.TestCase):
                 tile.cy,
                 tile.width,
                 tile.height,
+                class_id=27 if index == 0 else None,
                 face_score=1.0 if index == 0 else 0.0,
             )
             for index, tile in enumerate(dead_wall)
@@ -203,6 +204,22 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(result.dora[0].tile_count, 1)
         self.assertEqual([cluster.tile_count for cluster in result.discards], [12])
         self.assertEqual(result.discards[0].tiles, tuple(discards))
+
+    def test_dora_must_be_a_face_tile_embedded_in_the_wall(self) -> None:
+        indicator = TileBox(0.32, 0.30, 0.035, 0.05, 27, 0.9)
+        wall = [
+            TileBox(x, 0.30, 0.035, 0.05, face_score=0.0)
+            for x in (0.20, 0.24, 0.28, 0.36, 0.40, 0.44)
+        ]
+        unrelated_face = TileBox(0.65, 0.55, 0.035, 0.05, 3, 0.99)
+
+        result = cluster_layout(
+            [*wall, indicator, unrelated_face],
+            LayoutParams(player_direction=(0, 1)),
+        )
+
+        self.assertEqual(result.dora[0].tiles, (indicator,))
+        self.assertNotIn(unrelated_face, result.dead_wall.tiles)
 
     def test_names_open_melds_from_gap_rotation_and_tile_classes(self) -> None:
         def tiles(
