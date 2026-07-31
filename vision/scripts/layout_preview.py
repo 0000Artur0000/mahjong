@@ -3,7 +3,7 @@
 import argparse
 import json
 from collections.abc import Iterable
-from math import atan2, hypot
+from math import atan2, degrees, hypot
 from pathlib import Path
 
 import cv2
@@ -229,6 +229,7 @@ def render_predictions(
                 ],
             }
         )
+        del image, preview
     (output / "groups.json").write_text(json.dumps(summary, indent=2))
     return rendered
 
@@ -239,6 +240,7 @@ def _draw(
     clusters: Iterable[Cluster],
     melds: Iterable[Meld] = (),
 ) -> np.ndarray:
+    clusters = tuple(clusters)
     height, width = image.shape[:2]
     filled = image.copy()
     polygons = []
@@ -266,6 +268,7 @@ def _draw(
         cv2.fillPoly(filled, [polygon], color)
         polygons.append((cluster, polygon, color))
     preview = cv2.addWeighted(filled, 0.15, image, 0.85, 0)
+    del filled
     table = np.array(
         [
             (
@@ -295,6 +298,23 @@ def _draw(
             2,
             cv2.LINE_AA,
         )
+    tile_shapes = []
+    tile_fill = preview.copy()
+    for cluster in clusters:
+        color = COLORS.get(cluster.role, (160, 160, 160))
+        shade = tuple(round(channel * 0.45) for channel in color)
+        for tile in cluster.tiles:
+            top, bottom, sides = _tile_prism(tile, image.shape)
+            cv2.fillPoly(tile_fill, [bottom, *sides], shade)
+            cv2.fillPoly(tile_fill, [top], color)
+            tile_shapes.append((top, bottom, color, shade))
+    preview = cv2.addWeighted(tile_fill, 0.25, preview, 0.75, 0)
+    del tile_fill
+    for top, bottom, color, shade in tile_shapes:
+        cv2.polylines(preview, [bottom], True, shade, 1, cv2.LINE_AA)
+        cv2.polylines(preview, [top], True, color, 2, cv2.LINE_AA)
+        for start, end in zip(top, bottom, strict=True):
+            cv2.line(preview, tuple(start), tuple(end), shade, 1, cv2.LINE_AA)
     for meld in melds:
         left, top, right, bottom = meld.bounds
         polygon = np.array(
@@ -322,6 +342,35 @@ def _draw(
             cv2.LINE_AA,
         )
     return preview
+
+
+def _tile_prism(
+    tile: TileBox,
+    image_shape: tuple[int, ...],
+) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
+    """Return a small pseudo-3D prism around one detected tile."""
+
+    height, width = image_shape[:2]
+    box_width, box_height = tile.width * width, tile.height * height
+    major, minor = max(box_width, box_height), min(box_width, box_height)
+    angle = degrees(tile.angle) if tile.angle is not None else (
+        90 if box_height > box_width else 0
+    )
+    top = np.rint(
+        cv2.boxPoints(
+            ((tile.cx * width, tile.cy * height), (major, minor), angle)
+        )
+    ).astype(np.int32)
+    depth = max(2, round(minor * 0.08))
+    bottom = top + (depth, depth)
+    sides = [
+        np.array(
+            [top[index], top[(index + 1) % 4], bottom[(index + 1) % 4], bottom[index]],
+            dtype=np.int32,
+        )
+        for index in range(4)
+    ]
+    return top, bottom, sides
 
 
 def _countgd_detections(
