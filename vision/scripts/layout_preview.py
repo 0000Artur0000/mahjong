@@ -151,6 +151,10 @@ def render_predictions(
                     box.angle,
                 )
             boxes.append(box)
+            if len(detection.get("polygon", ())) >= 3:
+                tile_polygons[_tile_key(box)] = np.asarray(
+                    detection["polygon"], dtype=np.int32
+                )
             matched_mask = max(
                 (
                     mask
@@ -165,9 +169,11 @@ def render_predictions(
                 default=None,
             )
             if matched_mask and len(matched_mask.get("polygon", ())) >= 3:
-                tile_polygons[_tile_key(box)] = np.asarray(
-                    matched_mask["polygon"], dtype=np.int32
+                segmented = _segmented_outline(
+                    matched_mask["polygon"], detection["box"], image.shape
                 )
+                if segmented is not None:
+                    tile_polygons[_tile_key(box)] = segmented
         layout = cluster_layout(boxes, params)
         fallback = set() if faces else {
             tile
@@ -345,6 +351,40 @@ def _tile_outline(
     ).astype(np.int32)
 
 
+def _segmented_outline(
+    polygon: list[list[float]],
+    box: list[float],
+    image_shape: tuple[int, ...],
+) -> np.ndarray | None:
+    """Keep a tile-sized convex SAM silhouette, not its printed glyph."""
+
+    points = np.asarray(polygon, dtype=np.float32)
+    hull = cv2.convexHull(points).reshape(-1, 2)
+    height, width = image_shape[:2]
+    box_width, box_height = box[2] * width, box[3] * height
+    area = cv2.contourArea(hull)
+    span = np.ptp(hull, axis=0)
+    cx, cy = box[0] * width, box[1] * height
+    prompt = np.float32(
+        [
+            [cx - box_width / 2, cy - box_height / 2],
+            [cx + box_width / 2, cy - box_height / 2],
+            [cx + box_width / 2, cy + box_height / 2],
+            [cx - box_width / 2, cy + box_height / 2],
+        ]
+    )
+    intersection, _ = cv2.intersectConvexConvex(hull, prompt)
+    if (
+        area < box_width * box_height * 0.35
+        or area > box_width * box_height * 1.1
+        or intersection < area * 0.7
+        or span[0] < box_width * 0.55
+        or span[1] < box_height * 0.55
+    ):
+        return None
+    return np.rint(hull).astype(np.int32)
+
+
 def _normalized_xyxy(
     box: list[float], image_shape: tuple[int, ...]
 ) -> list[float]:
@@ -395,19 +435,20 @@ def _countgd_detections(
             ]
             dx, dy = max(edges, key=lambda edge: hypot(*edge))
             angle = atan2(dy / height, dx / width)
-        detections.append(
-            {
-                "tile": "tile",
-                "confidence": result["scores"][index],
-                "box": [
-                    (left + right) / (2 * width),
-                    (top + bottom) / (2 * height),
-                    (right - left) / width,
-                    (bottom - top) / height,
-                ],
-                "angle": angle,
-            }
-        )
+        detection = {
+            "tile": "tile",
+            "confidence": result["scores"][index],
+            "box": [
+                (left + right) / (2 * width),
+                (top + bottom) / (2 * height),
+                (right - left) / width,
+                (bottom - top) / height,
+            ],
+            "angle": angle,
+        }
+        if index < len(polygons) and len(polygons[index]) >= 3:
+            detection["polygon"] = polygons[index]
+        detections.append(detection)
     return detections
 
 

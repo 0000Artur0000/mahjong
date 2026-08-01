@@ -7,7 +7,11 @@ import cv2
 import numpy as np
 
 from dorahub_vision.layout import TileBox
-from vision.scripts.layout_preview import _tile_outline, render_predictions
+from vision.scripts.layout_preview import (
+    _segmented_outline,
+    _tile_outline,
+    render_predictions,
+)
 
 
 class LayoutPreviewTest(unittest.TestCase):
@@ -22,6 +26,24 @@ class LayoutPreviewTest(unittest.TestCase):
         )
 
         np.testing.assert_array_equal(actual, polygon)
+
+    def test_cleans_a_jagged_mask_and_rejects_a_small_glyph(self) -> None:
+        jagged = [[10, 10], [30, 10], [24, 20], [30, 30], [10, 30]]
+        outline = _segmented_outline(jagged, [0.2, 0.2, 0.2, 0.2], (100, 100, 3))
+        glyph = _segmented_outline(
+            [[45, 45], [55, 45], [55, 55], [45, 55]],
+            [0.5, 0.5, 0.4, 0.4],
+            (100, 100, 3),
+        )
+        shifted = _segmented_outline(
+            [[20, 0], [40, 0], [40, 20], [20, 20]],
+            [0.2, 0.2, 0.2, 0.2],
+            (100, 100, 3),
+        )
+
+        self.assertEqual(4, len(outline))
+        self.assertIsNone(glyph)
+        self.assertIsNone(shifted)
 
     def test_renders_real_cli_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

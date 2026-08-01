@@ -140,10 +140,18 @@ CountGD++ row-split JSON можно передать напрямую. `-` оз�
 прохода классификатора:
 
 ```bash
+python3 vision/scripts/split_tile_rows.py \
+  ../test/experiments/countgdpp-dataset257/results.json \
+  ../test/dataset \
+  ../test/experiments/countgdpp-dataset257/results-row-split.json
+
 PYTHONPATH=vision/src:. .mlvenv/bin/python vision/scripts/layout_preview.py \
-  ../test/experiments/countgdpp-dataset257/results-row-split-v2.json - \
+  ../test/experiments/countgdpp-dataset257/results-row-split.json - \
   ../test/dataset ../test/experiments/countgdpp-layout
 ```
+
+Первый скрипт меняет только длинные светлые ряды, подтверждённые минимум двумя
+детекциями и периодическими швами. Поэтому одиночные тайлы и фон он не дорисовывает.
 
 ### Экспериментальный top-down
 
