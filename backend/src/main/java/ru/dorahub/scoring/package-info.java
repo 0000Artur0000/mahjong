@@ -1,4 +1,4 @@
 @org.springframework.modulith.ApplicationModule(
     displayName = "Scoring",
-    allowedDependencies = {})
+    allowedDependencies = {"rules"})
 package ru.dorahub.scoring;

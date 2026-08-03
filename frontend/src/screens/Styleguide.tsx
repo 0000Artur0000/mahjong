@@ -303,7 +303,7 @@ export function Component() {
           {SHADOWS.map((token) => (
             <div
               key={token}
-              className="card elevated"
+              className="demo-card elevated"
               style={{ boxShadow: `var(${token})` }}
             >
               <code>{token.replace("--", "")}</code>

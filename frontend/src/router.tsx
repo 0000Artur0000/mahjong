@@ -3,21 +3,28 @@ import {
   redirect,
   type LoaderFunctionArgs,
 } from "react-router";
-import { getSession } from "@/auth/session";
+import { loadSession } from "@/auth/session";
 import { AdminLayout } from "@/routes/AdminLayout";
+import { AdminMetrics } from "@/screens/AdminMetrics";
 import { AppLayout } from "@/routes/AppLayout";
 import { PublicLayout } from "@/routes/PublicLayout";
 import { RouteError } from "@/routes/RouteError";
 import { TableLayout } from "@/routes/TableLayout";
 import { Home } from "@/screens/Home";
+import { Leaderboard } from "@/screens/Leaderboard";
 import { Login } from "@/screens/Login";
 import { NotFound } from "@/screens/NotFound";
 import { Placeholder } from "@/screens/Placeholder";
+import { Profile } from "@/screens/Profile";
+import { Table } from "@/screens/table/Table";
+import { Tables } from "@/screens/Tables";
 
 // Guards run in layout loaders, before the child screen renders — a denied
-// route redirects or 403s without ever flashing protected content.
-function requireAuth({ request }: LoaderFunctionArgs) {
-  if (!getSession()) {
+// route redirects or 403s without ever flashing protected content. Проверка идёт
+// у сервера: cookie сессии переживает и перезагрузку, и обновление приложения, а
+// отметка в браузере — нет.
+async function requireAuth({ request }: LoaderFunctionArgs) {
+  if (!(await loadSession())) {
     const url = new URL(request.url);
     throw redirect(
       `/login?next=${encodeURIComponent(url.pathname + url.search)}`,
@@ -26,9 +33,11 @@ function requireAuth({ request }: LoaderFunctionArgs) {
   return null;
 }
 
-function requireAdmin(args: LoaderFunctionArgs) {
-  requireAuth(args); // redirects when signed out
-  if (getSession()?.role !== "admin") {
+async function requireStaff(args: LoaderFunctionArgs) {
+  await requireAuth(args); // redirects when signed out
+  // Метрики и судейские экраны — право модератора; админ его покрывает.
+  const role = (await loadSession())?.role;
+  if (role !== "admin" && role !== "moderator") {
     throw new Response("Forbidden", { status: 403 });
   }
   return null;
@@ -61,16 +70,7 @@ export const router = createBrowserRouter([
           />
         ),
       },
-      {
-        path: "leaderboard",
-        element: (
-          <Placeholder
-            eyebrow="Публичное"
-            title="Рейтинг"
-            note="Рейтинги — FE-26."
-          />
-        ),
-      },
+      { path: "leaderboard", element: <Leaderboard /> },
       { path: "login", element: <Login /> },
       { path: "styleguide", lazy: () => import("@/screens/Styleguide") },
       { path: "*", element: <NotFound /> },
@@ -93,26 +93,8 @@ export const router = createBrowserRouter([
           />
         ),
       },
-      {
-        path: "tables",
-        element: (
-          <Placeholder
-            eyebrow="Кабинет"
-            title="Столы"
-            note="Создание и лобби — FE-11/12."
-          />
-        ),
-      },
-      {
-        path: "profile",
-        element: (
-          <Placeholder
-            eyebrow="Кабинет"
-            title="Профиль"
-            note="Профиль и приватность — FE-09."
-          />
-        ),
-      },
+      { path: "tables", element: <Tables /> },
+      { path: "profile", element: <Profile /> },
     ],
   },
   {
@@ -122,35 +104,17 @@ export const router = createBrowserRouter([
     loader: requireAuth,
     handle: { access: "auth" },
     children: [
-      {
-        index: true,
-        element: (
-          <Placeholder
-            eyebrow="Активный стол"
-            title="Стол"
-            note="Компас, исходы и подсчёт — FE-13+."
-          />
-        ),
-      },
+      { index: true, element: <Table /> },
     ],
   },
   {
     path: "admin",
     element: <AdminLayout />,
     errorElement: <RouteError />,
-    loader: requireAdmin,
+    loader: requireStaff,
     handle: { access: "admin" },
     children: [
-      {
-        index: true,
-        element: (
-          <Placeholder
-            eyebrow="Admin"
-            title="Судейская"
-            note="Судейские экраны — FE-29."
-          />
-        ),
-      },
+      { index: true, element: <AdminMetrics /> },
       {
         path: "moderation",
         element: (

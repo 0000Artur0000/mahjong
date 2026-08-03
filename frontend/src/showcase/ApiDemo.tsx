@@ -11,8 +11,9 @@ type State =
 export function ApiDemo() {
   const [state, setState] = useState<State>({ status: "loading" });
 
-  const load = useCallback((signal?: AbortSignal) => {
-    setState({ status: "loading" });
+  // setState живёт только внутри .then: синхронный сброс в эффекте давал лишний
+  // повторный рендер на монтировании — начальное состояние и так "loading".
+  const fetchTime = useCallback((signal?: AbortSignal) => {
     getServerTime(signal).then((result) => {
       if (signal?.aborted) return;
       setState(
@@ -25,15 +26,20 @@ export function ApiDemo() {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(controller.signal);
+    fetchTime(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [fetchTime]);
+
+  const reload = () => {
+    setState({ status: "loading" });
+    fetchTime();
+  };
 
   return (
-    <div className="card api-demo">
+    <div className="demo-card api-demo">
       <div className="api-demo__row">
         <code className="demo-label">GET /api/v1/system/time</code>
-        <Button onClick={() => load()}>Обновить</Button>
+        <Button onClick={reload}>Обновить</Button>
       </div>
 
       {state.status === "loading" && <Skeleton width="14rem" height="1.6rem" />}

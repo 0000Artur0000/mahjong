@@ -1,0 +1,24 @@
+{
+  "key": "rrc-ru",
+  "version": "1.0",
+  "displayName": "RRC-RU (на основе RRC 1.1)",
+
+  "startingPoints": 30000,
+  "returnPoints": 30000,
+  "uma": [15000, 5000, -5000, -15000],
+  "oka": 0,
+
+  "openTanyao": true,
+  "kiriageMangan": false,
+  "kazoeYakuman": true,
+  "stackYakuman": true,
+  "complexYakumanCountsDouble": false,
+  "doubleWindPairFu": 4,
+  "aotenjou": false,
+
+  "atamahane": false,
+  "abortiveDraws": true,
+  "tripleRonAbort": false,
+  "nagashiMangan": false,
+  "chomboPenalty": -20000
+}

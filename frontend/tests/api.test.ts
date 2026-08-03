@@ -46,6 +46,43 @@ describe("api client on mocks", () => {
     });
   });
 
+  // Spring Security включает CSRF по умолчанию: без заголовка любая мутация — 403.
+  it("attaches the CSRF token to a mutating request", async () => {
+    let sent: string | null = null;
+    let csrfCalls = 0;
+    server.use(
+      http.get("*/api/v1/auth/csrf", () => {
+        csrfCalls++;
+        return HttpResponse.json({ headerName: "X-CSRF-TOKEN", token: "tok-42" });
+      }),
+      http.post("*/api/v1/tables/:id/start", ({ request }) => {
+        sent = request.headers.get("X-CSRF-TOKEN");
+        return HttpResponse.json({ id: "t" });
+      }),
+    );
+
+    await api.POST("/api/v1/tables/{tableId}/start", {
+      params: { path: { tableId: "t" } },
+    });
+
+    expect(sent).toBe("tok-42");
+    expect(csrfCalls).toBe(1);
+  });
+
+  it("does not ask for a CSRF token on a read", async () => {
+    let csrfCalls = 0;
+    server.use(
+      http.get("*/api/v1/auth/csrf", () => {
+        csrfCalls++;
+        return HttpResponse.json({ headerName: "X-CSRF-TOKEN", token: "tok" });
+      }),
+    );
+
+    await api.GET("/api/v1/system/time");
+
+    expect(csrfCalls).toBe(0);
+  });
+
   it("maps a thrown fetch failure to a network error", () => {
     expect(toUiError(new TypeError("Failed to fetch"))).toMatchObject({
       kind: "network",

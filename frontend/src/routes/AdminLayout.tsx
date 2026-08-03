@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { signOut } from "@/auth/session";
+import { logout } from "@/api/auth";
+import { forgetSession } from "@/auth/session";
 import { ThemeToggle } from "@/theme";
 import { navClass } from "./nav";
 
@@ -29,8 +30,11 @@ export function AdminLayout() {
             type="button"
             className="btn btn--ghost"
             onClick={() => {
-              signOut();
-              navigate("/");
+              // Сессия живёт на сервере, поэтому выход — это запрос, а не забывание.
+              void logout().then(() => {
+                forgetSession();
+                navigate("/");
+              });
             }}
           >
             Выйти

@@ -371,14 +371,14 @@
   margin-top: var(--space-5);
 }
 
-.card {
+.demo-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
 }
 
-.card.elevated {
+.demo-card.elevated {
   display: grid;
   place-items: center;
   min-height: 6rem;
@@ -412,20 +412,8 @@
 }
 
 /* ---- Primitives demo layout ----------------------------------------- */
-.stack {
-  display: grid;
-  gap: var(--space-4);
-}
-.stack--wide {
-  gap: var(--space-7);
-}
-
-.cluster {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: center;
-}
+/* .stack и .cluster переехали в layout.css: ими пользуются экраны продукта, а
+   витрина — их гость, а не хозяин. */
 
 .demo-label {
   font-size: var(--text-xs);

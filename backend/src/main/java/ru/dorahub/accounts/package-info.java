@@ -1,4 +1,4 @@
 @org.springframework.modulith.ApplicationModule(
     displayName = "Accounts",
-    allowedDependencies = {})
+    allowedDependencies = {"system"})
 package ru.dorahub.accounts;

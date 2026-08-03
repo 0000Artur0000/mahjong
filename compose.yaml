@@ -1,3 +1,6 @@
+# Локальный запуск целиком. Наружу опубликован только фронт: nginx проксирует
+# /api/ на backend по внутренней сети compose, поэтому браузер видит один origin
+# (cookie сессии и CSRF работают без CORS), а postgres и backend с хоста недоступны.
 services:
   postgres:
     image: postgres:18-alpine
@@ -5,10 +8,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-dorahub}
       POSTGRES_USER: ${POSTGRES_USER:-dorahub}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # postgres:18 держит PGDATA в подкаталоге, поэтому монтируется весь
+      # /var/lib/postgresql — с монтированием в .../data образ отказывается стартовать.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dorahub} -d ${POSTGRES_DB:-dorahub}"]
       interval: 5s
@@ -24,22 +27,25 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Профиль local, а не prod: prod требует Secure-cookie и настоящий SMTP.
+      # Под local код входа печатается в лог контейнера — письма локально не нужны.
+      SPRING_PROFILES_ACTIVE: local
       DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dorahub}
       DATABASE_USER: ${POSTGRES_USER:-dorahub}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-    ports:
-      - "${BACKEND_PORT:-8080}:8080"
     stop_grace_period: 25s
     security_opt:
       - no-new-privileges:true
 
   frontend:
-    profiles: ["ui"]
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend
+    # 0.0.0.0 — чтобы порт был виден из Windows, а не только внутри WSL2.
     ports:
-      - "5173:80"
+      - "0.0.0.0:${FRONTEND_PORT:-5173}:80"
     security_opt:
       - no-new-privileges:true
 

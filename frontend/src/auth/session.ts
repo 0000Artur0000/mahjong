@@ -1,26 +1,43 @@
-// DEV auth stub. Real email / social login is FE-07; this exists only so FE-04
-// can demonstrate guarded routes, redirects and forbidden states before the
-// backend. Loaders read it synchronously, so guards resolve before render.
-export type Role = "user" | "admin";
-export type Session = { role: Role } | null;
+import { getMyProfile } from "@/api/profile";
 
-const KEY = "dorahub-session";
+/**
+ * Кто вошёл.
+ *
+ * Источник истины — cookie сессии на сервере, а не отметка в браузере: браузер
+ * может её потерять, устареть по формату или просто не знать, что сессию закрыли
+ * с другого устройства. Поэтому состояние спрашивается у сервера один раз за
+ * загрузку страницы и дальше берётся из памяти — загрузчики маршрутов ждут
+ * ответа до рендера, поэтому экраны читают его уже готовым.
+ */
+export type Role = "player" | "moderator" | "admin";
+export type Session = { role: Role; accountId: string } | null;
 
-export function getSession(): Session {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed?.role === "user" || parsed?.role === "admin" ? parsed : null;
-  } catch {
-    return null;
-  }
+let pending: Promise<Session> | null = null;
+let current: Session = null;
+
+/** Спросить сервер, кто вошёл. Повторные вызовы за одну загрузку не ходят по сети. */
+export function loadSession(): Promise<Session> {
+  pending ??= getMyProfile().then((result) => {
+    current = "data" in result ? { role: result.data.role, accountId: result.data.accountId } : null;
+    return current;
+  });
+  return pending;
 }
 
-export function signIn(role: Role) {
-  localStorage.setItem(KEY, JSON.stringify({ role }));
+/** Кто вошёл, без запроса. Внутри защищённых маршрутов уже заполнено загрузчиком. */
+export function currentSession(): Session {
+  return current;
 }
 
-export function signOut() {
-  localStorage.removeItem(KEY);
+/** Перечитать после входа: роль и идентификатор берутся из свежего профиля. */
+export function refreshSession(): Promise<Session> {
+  pending = null;
+  current = null;
+  return loadSession();
+}
+
+/** Забыть вход на этом устройстве. Саму сессию закрывает сервер. */
+export function forgetSession() {
+  pending = null;
+  current = null;
 }

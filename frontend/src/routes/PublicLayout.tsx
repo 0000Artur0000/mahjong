@@ -1,10 +1,10 @@
 import { Link, NavLink, Outlet } from "react-router";
-import { getSession } from "@/auth/session";
+import { currentSession } from "@/auth/session";
 import { ThemeToggle } from "@/theme";
 import { navClass } from "./nav";
 
 export function PublicLayout() {
-  const session = getSession();
+  const session = currentSession();
   return (
     <div className="layout">
       <header className="site-header">

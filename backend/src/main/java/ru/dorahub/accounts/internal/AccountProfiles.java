@@ -16,6 +16,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
+import ru.dorahub.system.BackgroundJob;
 
 class AccountProfiles {
 
@@ -55,7 +56,7 @@ class AccountProfiles {
     return jdbc
         .query(
             """
-            SELECT id, status, nickname, city, avatar_media_id, show_city, show_clubs
+            SELECT id, status, role, nickname, city, avatar_media_id, show_city, show_clubs
             FROM app_user
             WHERE id = ? AND status <> 'anonymized'
             """,
@@ -66,6 +67,7 @@ class AccountProfiles {
                     resultSet.getString("city"),
                     resultSet.getObject("avatar_media_id", UUID.class),
                     resultSet.getString("status"),
+                    resultSet.getString("role"),
                     new Privacy(
                         resultSet.getBoolean("show_city"), resultSet.getBoolean("show_clubs"))),
             accountId)
@@ -173,7 +175,7 @@ class AccountProfiles {
       initialDelayString = "${dorahub.accounts.cleanup-delay:PT10M}",
       fixedDelayString = "${dorahub.accounts.cleanup-delay:PT10M}")
   void scheduledCleanup() {
-    processNext();
+    BackgroundJob.run("accounts.cleanup", this::processNext);
   }
 
   boolean processNext() {
@@ -314,12 +316,14 @@ class AccountProfiles {
 
   record PublicProfile(UUID accountId, String nickname, String city) {}
 
+  /** {@code role} нужен экрану: без него неоткуда узнать, показывать ли откат раздачи. */
   record PrivateProfile(
       UUID accountId,
       String nickname,
       String city,
       UUID avatarMediaId,
       String status,
+      String role,
       Privacy privacy) {}
 
   record Deletion(UUID jobId, String status) {}

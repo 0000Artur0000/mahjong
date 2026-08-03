@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Dorahub Internal API
-  version: 0.7.0
+  version: 0.18.0
   description: |
     JSON uses lowerCamelCase property names and RFC 3339 UTC timestamps.
     Collection endpoints use zero-based pages and the shared page, size, sort and filter parameters.
@@ -556,6 +556,487 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/tables:
+    get:
+      operationId: listMyTables
+      summary: Tables the authenticated player sits at, most recent first
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Tables of the player
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TableSummaryView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createTable
+      summary: Create a table in lobby state with an immutable ruleset snapshot
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTableRequest"
+      responses:
+        "201":
+          description: Created table
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/tables/stats:
+    get:
+      operationId: getTableStats
+      summary: Pilot metrics over tables; moderator only, no personal data
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Counts and durations over all tables
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableStatsView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/tables/hands/mine:
+    get:
+      operationId: getMyHands
+      summary: Own won hands, newest first; reverted ones are left out
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Won hands of the signed-in player
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WonHandView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/tables/{tableId}:
+    get:
+      operationId: getTable
+      summary: Return the current table state and aggregate version
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Table state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/tables/{tableId}/events:
+    get:
+      operationId: getTableEvents
+      summary: Poll the append-only table journal after a known sequence
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/EventsSince"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Events ordered by sequence
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TableEventView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/tables/{tableId}/players:
+    post:
+      operationId: joinTable
+      summary: Join the lobby as the authenticated account
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Table state after joining
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/tables/{tableId}/players/me:
+    delete:
+      operationId: leaveLobby
+      summary: Leave a lobby before the game starts
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Table state without the player
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/tables/{tableId}/start:
+    post:
+      operationId: startTable
+      summary: Seat the four participants and start the game
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Active table
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/tables/{tableId}/riichi:
+    post:
+      operationId: declareRiichi
+      summary: Move a 1000 point stick from a seat onto the table
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiichiRequest"
+      responses:
+        "200":
+          description: Table state after the declaration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/tables/{tableId}/hands/preview:
+    post:
+      operationId: previewHand
+      summary: Score a hand without changing the table
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HandRequest"
+      responses:
+        "200":
+          description: Score breakdown and payments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HandPaymentView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/tables/{tableId}/hands:
+    post:
+      operationId: confirmHand
+      summary: Apply a won hand; requires the aggregate version the preview was built on
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HandRequest"
+      responses:
+        "200":
+          description: Applied payments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HandPaymentView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/tables/{tableId}/draws:
+    post:
+      operationId: recordDraw
+      summary: Record an exhaustive or abortive draw
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DrawRequest"
+      responses:
+        "200":
+          description: Table state after the draw
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/tables/{tableId}/seats/{seat}/player:
+    post:
+      operationId: takeSeat
+      summary: Take a seat left free mid-game; the game stops counting towards rating
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/Seat"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Table state with the seat taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: leaveSeat
+      summary: Leave the table mid-game; scores stay and the seat waits for a substitute
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/Seat"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Table state with the seat free
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/tables/{tableId}/revert:
+    post:
+      operationId: revertTable
+      summary: Return an active table to a version it previously had (moderator only)
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevertRequest"
+      responses:
+        "200":
+          description: Table state after the revert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/tables/{tableId}/finish:
+    post:
+      operationId: finishTable
+      summary: Finish the table early and publish final standings
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TableId"
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Finished table with standings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/ratings:
+    get:
+      operationId: getLadder
+      summary: Ladder of one format, strongest first
+      parameters:
+        - name: format
+          in: query
+          required: true
+          description: Ladder key, for example "hanchan". Formats are rated separately.
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Ladder rows ordered by rating
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LadderEntryView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/ratings/me/summary:
+    get:
+      operationId: getMyRatingSummary
+      summary: Own games, places and rating per format
+      parameters:
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: One row per format the player has finished games in
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FormatSummaryView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/ratings/me:
+    get:
+      operationId: getMyRatingChanges
+      summary: Own rating changes, newest first
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - $ref: "#/components/parameters/RequestCorrelationId"
+        - $ref: "#/components/parameters/ClientSource"
+      responses:
+        "200":
+          description: Rating changes of the signed-in player
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RatingChangeView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 components:
   securitySchemes:
     sessionCookie:
@@ -569,6 +1050,27 @@ components:
         type: string
         pattern: "^[A-Za-z0-9._-]{1,64}$"
   parameters:
+    TableId:
+      name: tableId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Seat:
+      name: seat
+      in: path
+      required: true
+      schema: { type: integer, minimum: 0, maximum: 3 }
+    EventsSince:
+      name: since
+      in: query
+      description: Return events with a sequence strictly greater than this value.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        default: 0
     AccountId:
       name: accountId
       in: path
@@ -684,6 +1186,293 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    CreateTableRequest:
+      type: object
+      required: [rulesetKey, format]
+      properties:
+        rulesetKey: { type: string, minLength: 1 }
+        format:
+          type: string
+          enum: [HANCHAN, TONPUUSEN]
+    RiichiRequest:
+      type: object
+      required: [seat]
+      properties:
+        seat: { type: integer, minimum: 0, maximum: 3 }
+    DrawRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [EXHAUSTIVE, ABORTIVE]
+        tenpaiSeats:
+          type: array
+          description: Seats that declared tenpai. Ignored for abortive draws.
+          items: { type: integer, minimum: 0, maximum: 3 }
+    DoraCount:
+      type: object
+      description: >
+        Готовые счётчики доры. Оставлены для совместимости; предпочтительно присылать
+        `doraIndicators`/`uraIndicators` и позволить серверу посчитать самому.
+        Если заданы индикаторы, эти счётчики игнорируются.
+      properties:
+        ordinary: { type: integer, minimum: 0, default: 0 }
+        ura: { type: integer, minimum: 0, default: 0 }
+        kan: { type: integer, minimum: 0, default: 0 }
+        aka: { type: integer, minimum: 0, default: 0 }
+    HandRequest:
+      type: object
+      required: [tiles, winningTile, winnerSeat]
+      properties:
+        tiles:
+          type: array
+          minItems: 1
+          description: Concealed part of the hand in mjai notation, winning tile included.
+          items: { type: string, minLength: 2 }
+        melds:
+          type: array
+          description: Called sets, for example "333p" for a pon or "1111s" for a kan.
+          items: { type: string, minLength: 3 }
+        winningTile: { type: string, minLength: 2 }
+        tsumo: { type: boolean, default: false }
+        winnerSeat: { type: integer, minimum: 0, maximum: 3 }
+        discarderSeat:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: Required for ron, omitted for tsumo.
+        doraIndicators:
+          type: array
+          description: >
+            Тайлы-индикаторы: первый базовый, остальные открыты канами. Сервер сам
+            выводит дору по циклу §11 и считает её в руке — предпочтительный путь.
+            Красные пятёрки в `dora` указывать не нужно: они уже в составе руки.
+          maxItems: 5
+          items: { type: string, minLength: 2 }
+        uraIndicators:
+          type: array
+          description: >
+            Нижние индикаторы, по одному на каждый верхний. Доступны только
+            победителю с объявленным риичи.
+          maxItems: 5
+          items: { type: string, minLength: 2 }
+        dora:
+          $ref: "#/components/schemas/DoraCount"
+        declaredYaku:
+          type: array
+          description: Yaku a photo cannot prove, declared by the player.
+          items:
+            type: string
+            enum: [Richi, WRichi, Ippatsu, Rinshan, Chankan, Haitei, Houtei, Tenhou, Chihou]
+        expectedVersion:
+          type: integer
+          format: int64
+          description: Aggregate version the preview was built on. Required to confirm.
+    HandPaymentView:
+      type: object
+      required: [han, fu, yaku, dora, yakumanCount, seatDelta, riichiSticksAwarded]
+      properties:
+        han: { type: integer }
+        fu: { type: integer }
+        yaku:
+          type: array
+          items: { type: string }
+        dora:
+          $ref: "#/components/schemas/DoraCount"
+        yakumanCount: { type: integer, minimum: 0 }
+        seatDelta:
+          type: array
+          description: Point change per seat. Always sums to zero.
+          minItems: 4
+          maxItems: 4
+          items: { type: integer }
+        riichiSticksAwarded: { type: integer, minimum: 0 }
+    TableSummaryView:
+      type: object
+      required: [id, state, format, handsPlayed, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        state:
+          type: string
+          enum: [lobby, active, finished]
+        format:
+          type: string
+          enum: [hanchan, tonpuusen]
+        handsPlayed: { type: integer, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+    PlacementView:
+      type: object
+      required: [seat, place, points, uma, result]
+      properties:
+        seat: { type: integer, minimum: 0, maximum: 3 }
+        place: { type: integer, minimum: 1, maximum: 4 }
+        points: { type: integer }
+        uma: { type: integer }
+        result: { type: integer }
+    TableView:
+      type: object
+      required:
+        [id, state, format, rulesetId, participants, seats, scores, dealerSeat, roundWind,
+         handNumber, honba, riichiSticks, handsPlayed, vacantSeats, version, nicknames,
+         updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        state:
+          type: string
+          enum: [lobby, active, finished]
+        format:
+          type: string
+          enum: [hanchan, tonpuusen]
+        rulesetId:
+          type: string
+          description: Ruleset key and version, for example "rrc-ru@1.0".
+        participants:
+          type: array
+          items: { type: string, format: uuid }
+        seats:
+          type: array
+          description: Players by seat once the game started; empty in lobby.
+          items: { type: string, format: uuid }
+        scores:
+          type: array
+          items: { type: integer }
+        dealerSeat: { type: integer, minimum: 0, maximum: 3 }
+        roundWind:
+          type: string
+          enum: [east, south, west, north]
+        handNumber: { type: integer, minimum: 1, maximum: 4 }
+        honba: { type: integer, minimum: 0 }
+        riichiSticks: { type: integer, minimum: 0 }
+        handsPlayed: { type: integer, minimum: 0 }
+        vacantSeats:
+          type: array
+          description: >-
+            Seats whose player left mid-game. Hands cannot be recorded until every seat is
+            taken again.
+          items: { type: integer, minimum: 0, maximum: 3 }
+        version:
+          type: integer
+          format: int64
+          description: Aggregate version; also the sequence of the last journal event.
+        nicknames:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            Nicknames of the participants by account id. A seat wind alone says nothing —
+            players need to see who sits where.
+        updatedAt:
+          type: string
+          format: date-time
+          description: >-
+            Last change of the table. A game with no new hands for a long time is shown as
+            stale by the client; the server never closes a game on its own, only empty lobbies.
+        finishedReason:
+          type: string
+          enum: [completed, early, abandoned_lobby]
+          description: >-
+            Why the table is finished; absent while the game is on. Only "completed" counts
+            towards rating.
+        standings:
+          type: array
+          description: Final places with uma; present only for a finished game.
+          items:
+            $ref: "#/components/schemas/PlacementView"
+    LadderEntryView:
+      type: object
+      required: [accountId, rating, games]
+      properties:
+        accountId: { type: string, format: uuid }
+        nickname:
+          type: [string, "null"]
+          description: Absent for an account that no longer exists.
+        rating: { type: integer }
+        games: { type: integer, minimum: 1 }
+    FormatSummaryView:
+      type: object
+      required: [format, rating, games, places, averagePlace]
+      properties:
+        format: { type: string }
+        rating: { type: integer }
+        games:
+          type: integer
+          minimum: 1
+          description: Games that still count; a game taken off the ladder is not among them.
+        places:
+          type: array
+          description: How many times the player finished first, second, third and fourth.
+          items: { type: integer, minimum: 0 }
+          minItems: 4
+          maxItems: 4
+        averagePlace: { type: number }
+    TableStatsView:
+      type: object
+      required:
+        [lobbies, active, stale, completed, abandonedEarly, abandonedLobby, completionRate,
+         handsPerCompletedGame, medianMinutes, p90Minutes]
+      properties:
+        lobbies: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        stale:
+          type: integer
+          minimum: 0
+          description: Active games with no new hand for over 12 hours.
+        completed: { type: integer, minimum: 0 }
+        abandonedEarly: { type: integer, minimum: 0 }
+        abandonedLobby: { type: integer, minimum: 0 }
+        completionRate:
+          type: number
+          description: Percentage of finished tables that were played to the end of the format.
+        handsPerCompletedGame: { type: number }
+        medianMinutes: { type: integer, format: int64 }
+        p90Minutes: { type: integer, format: int64 }
+    WonHandView:
+      type: object
+      required: [tableId, sequence, han, fu, yaku, at]
+      properties:
+        tableId: { type: string, format: uuid }
+        sequence: { type: integer, format: int64, minimum: 1 }
+        han: { type: integer, minimum: 0 }
+        fu: { type: integer, minimum: 0 }
+        yaku:
+          type: array
+          items: { type: string }
+        at: { type: string, format: date-time }
+    RatingChangeView:
+      type: object
+      required: [tableId, format, place, delta, ratingAfter, at]
+      properties:
+        tableId: { type: string, format: uuid }
+        format: { type: string }
+        place: { type: integer, minimum: 1, maximum: 4 }
+        delta:
+          type: integer
+          description: Change of rating for this game. Deltas of one game sum to zero.
+        ratingAfter: { type: integer }
+        at: { type: string, format: date-time }
+    RevertRequest:
+      type: object
+      required: [toVersion, reason]
+      properties:
+        toVersion:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Aggregate version to return to. Must be one the table published.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Goes to the journal; a revert without a reason is indistinguishable from abuse.
+    TableEventView:
+      type: object
+      required: [sequence, type, payload]
+      properties:
+        sequence: { type: integer, format: int64, minimum: 1 }
+        type: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
     CsrfTokenResponse:
       type: object
       additionalProperties: false
@@ -751,7 +1540,7 @@ components:
     PrivateProfile:
       type: object
       additionalProperties: false
-      required: [accountId, nickname, status, privacy]
+      required: [accountId, nickname, status, role, privacy]
       properties:
         accountId:
           type: string
@@ -769,6 +1558,12 @@ components:
         status:
           type: string
           enum: [active, deactivated]
+        role:
+          type: string
+          enum: [player, moderator, admin]
+          description: >-
+            Rights of the account. Only a moderator can revert a confirmed hand; the screen
+            needs this to decide whether to offer it.
         privacy:
           $ref: "#/components/schemas/ProfilePrivacy"
     UpdateProfileRequest:

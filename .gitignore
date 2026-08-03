@@ -13,6 +13,7 @@ vision/.venv/
 vision/.pytest_cache/
 vision/**/__pycache__/
 *.pyc
+*.egg-info/
 
 data/
 models/
@@ -20,4 +21,3 @@ uploads/
 *.onnx
 *.pt
 *.pth
-

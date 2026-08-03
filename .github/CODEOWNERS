@@ -1,12 +1,1 @@
-# Заменить placeholders реальными пользователями/командами после создания repository.
-/backend/ @backend-owner
-/backend/src/main/resources/db/migration/ @backend-owner @database-owner
-/frontend/ @frontend-owner
-/vision/ @ml-owner
-/contracts/ @contract-owner
-/contracts/vision/ @contract-owner @backend-owner @ml-owner
-/contracts/rulesets/ @contract-owner @rules-owner
-/infra/ @devops-owner
-/compose.yaml @devops-owner
-/.github/ @devops-owner @tech-lead
-
+* @0000Artur0000

@@ -1,12 +1,15 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { signOut } from "@/auth/session";
+import { logout } from "@/api/auth";
+import { forgetSession } from "@/auth/session";
 import { ThemeToggle } from "@/theme";
 import { navClass } from "./nav";
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const leave = () => {
-    signOut();
+  // Сессия живёт на сервере, поэтому выход — это запрос, а не забывание.
+  const leave = async () => {
+    await logout();
+    forgetSession();
     navigate("/");
   };
 
@@ -32,7 +35,7 @@ export function AppLayout() {
         </nav>
         <div className="site-header__actions">
           <ThemeToggle />
-          <button type="button" className="btn btn--ghost" onClick={leave}>
+          <button type="button" className="btn btn--ghost" onClick={() => void leave()}>
             Выйти
           </button>
         </div>

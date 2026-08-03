@@ -1,16 +1,26 @@
+import { Inbox, Settings } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import {
+  Avatar,
+  Badge,
   Button,
+  Card,
   Checkbox,
+  CodeInput,
   Dialog,
+  EmptyState,
   Field,
+  GlowCard,
+  Icon,
   Input,
   Link,
   Menu,
   Popover,
   Radio,
+  ScoreChip,
   Select,
   Skeleton,
+  Tabs,
   Textarea,
   useToast,
 } from "@/ui";
@@ -27,6 +37,7 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
 export function Primitives() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [nickname, setNickname] = useState("");
+  const [code, setCode] = useState("");
   const toast = useToast();
   const nicknameError =
     nickname.trim().length > 0 && nickname.trim().length < 3
@@ -51,7 +62,7 @@ export function Primitives() {
               Недоступно
             </Button>
             <Button variant="secondary" icon aria-label="Настройки">
-              <span aria-hidden="true">⚙</span>
+              <Icon icon={Settings} />
             </Button>
             <Link href="#primitives">Правила рейтинга</Link>
           </div>
@@ -162,6 +173,79 @@ export function Primitives() {
               <Skeleton width="40%" height="0.9rem" />
             </div>
           </div>
+        </Group>
+      </div>
+
+      <div className="stack stack--wide">
+        <Group label="Badge">
+          <div className="cluster">
+            <Badge tone="accent">Лига A</Badge>
+            <Badge tone="positive">Подтверждён</Badge>
+            <Badge tone="warning">Provisional</Badge>
+            <Badge tone="danger">Оспорено</Badge>
+            <Badge>Ханчан</Badge>
+          </div>
+        </Group>
+
+        <Group label="Avatar">
+          <div className="cluster">
+            <Avatar name="Артур Сахиуллин" size="sm" />
+            <Avatar name="Артур Сахиуллин" size="md" />
+            <Avatar name="Мия Кобаяси" size="lg" />
+          </div>
+        </Group>
+
+        <Group label="ScoreChip — очки за столом">
+          <div className="cluster">
+            <ScoreChip tile="1z" label="Восток" score={32600} delta={2600} dealer />
+            <ScoreChip tile="2z" label="Юг" score={27400} delta={-2600} />
+            <ScoreChip tile="3z" label="Запад" score={30000} />
+          </div>
+        </Group>
+
+        <Group label="Card и GlowCard">
+          <div className="cluster">
+            <Card>Обычная карточка</Card>
+            <Card elevated lift>
+              Приподнятая, с hover-подъёмом
+            </Card>
+            <GlowCard>Золотая рамка, свечение на hover</GlowCard>
+          </div>
+        </Group>
+
+        <Group label="Tabs">
+          <Tabs
+            tabs={[
+              { id: "hands", label: "Раздачи", panel: "История раздач стола." },
+              { id: "scores", label: "Очки", panel: "Динамика очков по раздачам." },
+              { id: "rules", label: "Правила", panel: "Снимок пресета RRC-RU 1.0." },
+            ]}
+          />
+        </Group>
+
+        <Group label="EmptyState">
+          <EmptyState
+            icon={Inbox}
+            title="Столов пока нет"
+            hint="Создайте стол и позовите тиммейтов по коду — партия начнётся, когда сядут четверо."
+            action={<Button variant="secondary">Создать стол</Button>}
+          />
+        </Group>
+
+        <Group label="Размеры и загрузка кнопки">
+          <div className="cluster">
+            <Button size="sm">Малая</Button>
+            <Button>Обычная</Button>
+            <Button size="lg">Большая</Button>
+            <Button loading>Загрузка</Button>
+            <Button variant="secondary" loading>
+              Загрузка
+            </Button>
+          </div>
+        </Group>
+
+        <Group label="CodeInput — вход по одноразовому коду">
+          <CodeInput value={code} onChange={setCode} />
         </Group>
       </div>
 
