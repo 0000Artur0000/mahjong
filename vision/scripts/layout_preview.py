@@ -32,6 +32,36 @@ COLORS = {
     "dora": (255, 0, 255),
     "discard": (0, 171, 255),
 }
+
+
+def _wall_gap_box(face, proposals):
+    """Restore a face tile lying in a one-tile gap between two wall backs."""
+
+    if len(proposals) < 2:
+        return None
+    cx, cy = face[:2]
+    nearest = sorted(
+        proposals,
+        key=lambda box: hypot(box[0] - cx, box[1] - cy),
+    )[:2]
+    distances = [hypot(box[0] - cx, box[1] - cy) for box in nearest]
+    scale = median(max(box[2], box[3]) for box in nearest)
+    if not scale or max(distances) > 1.25 * scale or min(distances) < 0.3 * scale:
+        return None
+    first = nearest[0][0] - cx, nearest[0][1] - cy
+    second = nearest[1][0] - cx, nearest[1][1] - cy
+    if (first[0] * second[0] + first[1] * second[1]) / (
+        distances[0] * distances[1]
+    ) > -0.7:
+        return None
+    return [
+        cx,
+        cy,
+        median(box[2] for box in nearest),
+        median(box[3] for box in nearest),
+    ]
+
+
 def render_predictions(
     predictions_path: Path,
     face_predictions_path: Path,
@@ -92,6 +122,8 @@ def render_predictions(
             player_direction=(0, 1),
             table_corners=corners,
         )
+        faces = face_predictions.get(image_path.name, ())
+        wall_proposals = []
         # Рубашки чужого цвета детектор не видит вовсе: без них не найти ни стену,
         # ни мёртвую стену, ни дору. Дополняем предложениями по цвету.
         for proposal in (
@@ -107,6 +139,7 @@ def render_predictions(
             box_height = max(1e-4, min(proposal.height, 2 * cy, 2 * (1 - cy)))
             if box_width <= 1e-4 or box_height <= 1e-4:
                 continue
+            wall_proposals.append([cx, cy, box_width, box_height])
             detections.append(
                 {
                     "tile": "tile",
@@ -116,7 +149,25 @@ def render_predictions(
                 }
             )
 
-        faces = face_predictions.get(image_path.name, ())
+        for face in sorted(
+            faces, key=lambda candidate: candidate["confidence"], reverse=True
+        ):
+            if any(
+                _iou(face["box"], detection["box"]) >= 0.2
+                for detection in detections
+            ):
+                continue
+            gap_box = _wall_gap_box(face["box"], wall_proposals)
+            if gap_box is not None:
+                detections.append(
+                    {
+                        "tile": face["tile"],
+                        "confidence": face["confidence"],
+                        "proposed": True,
+                        "box": gap_box,
+                    }
+                )
+
         masks = mask_predictions.get(image_path.name, ())
         boxes = []
         tile_polygons = {}

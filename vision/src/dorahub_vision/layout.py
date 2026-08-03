@@ -1,6 +1,7 @@
 """Geometry-first layout parser adapted from haitaks/mahjong."""
 
 from dataclasses import dataclass, field
+from itertools import combinations
 from math import atan2, cos, fsum, hypot, isfinite, sin
 from statistics import median, pstdev
 
@@ -152,7 +153,7 @@ class TileBox:
 class LayoutParams:
     eps_k: float = 1.5
     min_samples: int = 2
-    hand_min_tiles: int = 3
+    hand_min_tiles: int = 13
     hand_max_tiles: int = 18
     hand_merge_gap_k: float = 3.0
     discard_min_tiles: int = 2
@@ -468,341 +469,335 @@ def _assign_roles(
     params: LayoutParams,
     frame: TableFrame | None = None,
 ) -> tuple[Cluster | None, Cluster | None]:
-    has_face_evidence = any(
-        tile.face_score is not None
-        for cluster in clusters
-        for tile in cluster.tiles
+    tiles = tuple(tile for cluster in clusters for tile in cluster.tiles)
+    clusters.clear()
+
+    hand_tiles = _bottom_hand(tiles, params, frame)
+    claimed = set(hand_tiles)
+    hand = _describe(hand_tiles, frame) if hand_tiles else None
+    if hand is not None:
+        hand.role, hand.seat = "hand", "self"
+        clusters.append(hand)
+
+    remaining = tuple(tile for tile in tiles if tile not in claimed)
+    face_tiles = tuple(
+        tile
+        for tile in remaining
+        if tile.face_score is not None
+        and tile.face_score >= params.face_threshold
     )
-    for cluster in tuple(clusters):
-        faces = tuple(
-            tile
-            for tile in cluster.tiles
-            if (tile.face_score or 0) >= params.face_threshold
-        )
-        backs = tuple(tile for tile in cluster.tiles if tile not in faces)
-        if (
-            len(faces) >= params.discard_min_tiles
-            and len(backs) >= params.dead_wall_min_tiles
-        ):
-            face_cluster = _describe(faces, frame)
-            back_cluster = _describe(backs, frame)
-            if (
-                hypot(
-                    face_cluster.centroid[0] - back_cluster.centroid[0],
-                    face_cluster.centroid[1] - back_cluster.centroid[1],
-                )
-                >= 0.6 * max(face_cluster.scale, back_cluster.scale)
-            ):
-                clusters.remove(cluster)
-                clusters.extend((face_cluster, back_cluster))
-    if frame:
-        for cluster in clusters:
-            if not (
-                -0.1 <= cluster.centroid[0] <= 1.1
-                and -0.1 <= cluster.centroid[1] <= 1.1
-            ):
-                cluster.role = "noise"
-    walls = [
+    discard_candidates = [
         cluster
-        for cluster in clusters
-        if cluster.role == "other"
-        and cluster.tile_count >= params.dead_wall_min_tiles
-        and (
-            cluster.tile_count > params.dead_wall_min_tiles
-            or _face_count(cluster, params.face_threshold) > 0
+        for oriented in (
+            face_tiles,
+            tuple(tile for tile in face_tiles if tile.height >= tile.width),
+            tuple(tile for tile in face_tiles if tile.height < tile.width),
         )
+        for cluster in _cluster(oriented, params, frame)
+        if params.discard_min_tiles <= cluster.tile_count <= 24
+        and cluster.rows <= 4
+        and (
+            cluster.rows > 1
+            or cluster.tile_count <= MAX_DISCARD_ROW_TILES
+            or cluster.linearity < 0.9
+        )
+    ]
+    discards = _discard_quartet(discard_candidates)
+    directions = _seat_directions((0.0, 1.0))
+    center = _center(list(discards)) if discards else _tile_center(remaining, frame)
+    for discard in discards:
+        discard.role = "discard"
+        discard.seat = _seat(discard.centroid, center, directions)
+        discard.heuristic_score = 1.0
+        clusters.append(discard)
+        claimed.update(discard.tiles)
+
+    remaining = tuple(tile for tile in tiles if tile not in claimed)
+    wall_candidates = [
+        cluster
+        for cluster in _cluster(remaining, params, frame)
+        if cluster.tile_count >= params.dead_wall_min_tiles
         and cluster.rows <= 2
         and cluster.linearity >= 0.6
         and _back_fraction(cluster, params.face_threshold) > 0.5
     ]
+    walls = _one_wall_per_seat(wall_candidates, center, directions, params)
+    dead_wall = None
     for wall in walls:
-        wall.role, wall.heuristic_score = "wall", _back_fraction(
-            wall, params.face_threshold
+        faces = tuple(
+            tile
+            for tile in wall.tiles
+            if tile.face_score is not None
+            and tile.face_score >= params.face_threshold
         )
+        backs = tuple(tile for tile in wall.tiles if tile not in faces)
+        if 1 <= len(faces) <= DORA_MAX_TILES:
+            wall_body = _describe(backs, frame)
+            is_dead = (
+                dead_wall is None
+                and len(backs) >= params.dead_wall_min_tiles
+                and wall.tile_count <= params.dead_wall_max_tiles
+            )
+            wall_body.role = "dead_wall" if is_dead else "wall"
+            wall_body.seat = _seat(wall_body.centroid, center, directions)
+            if is_dead:
+                dead_wall = wall_body
+            dora = _describe(faces, frame)
+            dora.role, dora.seat = "dora", wall_body.seat
+            clusters.extend((wall_body, dora))
+        else:
+            wall.role = "wall"
+            wall.seat = _seat(wall.centroid, center, directions)
+            clusters.append(wall)
+        claimed.update(wall.tiles)
 
-    dead_wall = max(
-        (
-            wall
-            for wall in walls
-            if wall.tile_count <= params.dead_wall_max_tiles
-            and 1 <= _face_count(wall, params.face_threshold) <= 5
-        ),
-        key=lambda wall: sum(tile.face_score or 0 for tile in wall.tiles),
-        default=None,
+    leftovers = tuple(tile for tile in tiles if tile not in claimed)
+    for noise in _cluster(leftovers, params, frame):
+        noise.role = "noise"
+        clusters.append(noise)
+    return hand, _extract_embedded_dora(clusters, params, frame) or dead_wall
+
+
+def _bottom_hand(
+    tiles: tuple[TileBox, ...],
+    params: LayoutParams,
+    frame: TableFrame | None,
+) -> tuple[TileBox, ...]:
+    """Grow the player's hand from the lowest detected tile."""
+
+    if not tiles:
+        return ()
+    rejected: set[TileBox] = set()
+    lowest = max(tiles, key=lambda tile: tile.cy + tile.height / 2)
+    lowest_edge = lowest.cy + lowest.height / 2
+    candidates = sorted(
+        tiles,
+        key=lambda tile: tile.cy + tile.height / 2,
+        reverse=True,
     )
-    if dead_wall is not None:
-        dead_wall.role = "dead_wall"
-
-    direction = _normalize(
-        params.player_direction or _infer_player_direction(clusters)
-    )
-    available = [cluster for cluster in clusters if cluster.role == "other"]
-    hand_candidates = [
-        cluster
-        for cluster in available
-        if not has_face_evidence
-        or not any(tile.face_score is not None for tile in cluster.tiles)
-        or _face_count(cluster, params.face_threshold) > 0
-    ]
-    hand = None
-    hand_groups = _components(
-        hand_candidates,
-        params.hand_merge_gap_k,
-        radial_direction=direction,
-    )
-    if hand_groups:
-        parts = max(
-            hand_groups,
-            key=lambda group: (
-                _projection(_merged(group, frame).centroid, direction)
-                + _merged(group, frame).scale
-                * min(sum(cluster.tile_count for cluster in group), 14)
-                / 2
-            ),
-        )
-        if sum(part.tile_count for part in parts) > params.hand_max_tiles:
-            bounded = []
-            for part in sorted(
-                parts,
-                key=lambda cluster: _projection(cluster.centroid, direction),
-                reverse=True,
-            ):
-                if (
-                    part.tile_count <= params.hand_max_tiles
-                    - sum(cluster.tile_count for cluster in bounded)
-                    and (
-                        not bounded
-                        or len(
-                            _components(
-                                [*bounded, part],
-                                params.hand_merge_gap_k,
-                                radial_direction=direction,
-                            )
-                        )
-                        == 1
-                    )
-                ):
-                    bounded.append(part)
-            parts = bounded
-        if sum(part.tile_count for part in parts) >= params.hand_min_tiles:
-            hand = _replace(
-                clusters, parts, "hand", frame=frame, seat="self"
-            )
-
-    available = [cluster for cluster in clusters if cluster.role == "other"]
-    if not available:
-        return hand, dead_wall
-    face_clusters = [
-        cluster
-        for cluster in available
-        if _face_count(cluster, params.face_threshold) > 0
-    ]
-    radial_clusters = face_clusters or available
-    center = _center(radial_clusters)
-    directions = _seat_directions(direction)
-    for seat in ("left", "opposite", "right"):
-        seat_direction = directions[seat]
-        opponent_groups = [
-            *_components(
-                [
-                    cluster
-                    for cluster in clusters
-                    if cluster.role in {"other", "wall"}
-                    and _face_count(cluster, params.face_threshold) > 0
-                ],
-                params.hand_merge_gap_k,
-                radial_direction=seat_direction,
-            ),
-            *_components(
-                [
-                    cluster
-                    for cluster in clusters
-                    if cluster.role in {"other", "wall"}
-                    and _face_count(cluster, params.face_threshold) == 0
-                ],
-                params.hand_merge_gap_k,
-                radial_direction=seat_direction,
-            ),
-        ]
-        scene_radius = max(
-            0.5,
-            2
-            * median(
-                hypot(
-                    cluster.centroid[0] - center[0],
-                    cluster.centroid[1] - center[1],
-                )
-                for cluster in radial_clusters
-            )
-        )
-        candidates = []
-        for parts in opponent_groups:
-            merged = _merged(parts, frame)
-            inner_walls = [
-                wall
-                for wall in walls
-                if wall not in parts
-                and wall is not dead_wall
-                and _seat(wall.centroid, center, directions) == seat
-            ]
-            wall_barrier = max(
-                (
-                    _projection(wall.centroid, seat_direction)
-                    - _projection(center, seat_direction)
-                    for wall in inner_walls
-                ),
-                default=0.0,
-            )
-            outward = _projection(merged.centroid, seat_direction) - _projection(
-                center, seat_direction
-            )
-            tangent = -seat_direction[1], seat_direction[0]
-            sideways = abs(
-                _projection(merged.centroid, tangent)
-                - _projection(center, tangent)
-            )
-            edge_seed = (
-                (seat == "left" and merged.centroid[0] <= 0.15)
-                or (seat == "right" and merged.centroid[0] >= 0.85)
-                or (seat == "opposite" and merged.centroid[1] <= 0.15)
-            )
-            visible = _face_count(merged, params.face_threshold) > 0
-            table_edge = min(
-                merged.centroid[0],
-                merged.centroid[1],
-                1 - merged.centroid[0],
-            ) <= 0.15
-            visible_seed = visible and (
-                (
-                    edge_seed
-                    and (
-                        merged.tile_count <= 4
-                        or any(part.role == "wall" for part in parts)
-                    )
-                )
-                or (
-                    table_edge
-                    and any(part.role == "wall" for part in parts)
-                )
-            )
-            closed_seed = (
-                merged.tile_count >= 6
-                and wall_barrier
-                and outward > wall_barrier + merged.scale
-            ) or (
-                merged.tile_count >= 10
-                and edge_seed
-            )
-            if (
-                (
-                    2 <= merged.tile_count <= params.hand_max_tiles
-                    if visible and edge_seed
-                    else 3 <= merged.tile_count <= params.hand_max_tiles
-                )
-                and (
-                    visible_seed
-                    or closed_seed
-                )
-                and outward <= scene_radius
-                and (
-                    seat == "opposite"
-                    or outward >= 1.5 * sideways
-                )
-                and abs(
-                    merged.axis[0] * seat_direction[0]
-                    + merged.axis[1] * seat_direction[1]
-                )
-                <= 0.65
-            ):
-                candidates.append((outward, parts))
-        for _, parts in sorted(candidates, reverse=True, key=lambda item: item[0]):
-            if not all(part in clusters for part in parts):
-                continue
-            _replace(
-                clusters,
-                parts,
-                "opponent_hand",
-                frame=frame,
-                seat=seat,
-            )
-
-    _promote_edge_hands(
-        clusters,
-        params,
-        directions,
-        frame,
-        center,
-    )
-
-    discard_candidates = [
-        cluster
-        for cluster in clusters
-        if cluster.role == "other"
-        and cluster.tile_count >= params.discard_min_tiles
-        and _face_count(cluster, params.face_threshold) > 0
-    ]
-    if discard_candidates:
-        discard_center = _center(discard_candidates)
-        distances = [
-            hypot(
-                cluster.centroid[0] - discard_center[0],
-                cluster.centroid[1] - discard_center[1],
-            )
-            for cluster in discard_candidates
-        ]
-        limit = max(
-            params.discard_outlier_k * median(distances),
-            params.hand_merge_gap_k
-            * median(cluster.scale for cluster in discard_candidates),
-        )
-        inliers = [
-            cluster
-            for cluster, distance in zip(
-                discard_candidates, distances, strict=True
-            )
-            if distance <= limit
-        ]
-        tangent = -direction[1], direction[0]
-        radial = (
-            min(inliers, key=lambda cluster: _projection(cluster.centroid, direction)),
-            max(inliers, key=lambda cluster: _projection(cluster.centroid, direction)),
-        )
-        sideways = (
-            min(inliers, key=lambda cluster: _projection(cluster.centroid, tangent)),
-            max(inliers, key=lambda cluster: _projection(cluster.centroid, tangent)),
-        )
-        radial_span = abs(
-            _projection(radial[1].centroid, direction)
-            - _projection(radial[0].centroid, direction)
-        )
-        radial_skew = abs(
-            _projection(radial[1].centroid, tangent)
-            - _projection(radial[0].centroid, tangent)
-        )
-        opposite = radial if radial_span >= radial_skew / 2 else sideways
-        seat_center = (
-            (opposite[0].centroid[0] + opposite[1].centroid[0]) / 2,
-            (opposite[0].centroid[1] + opposite[1].centroid[1]) / 2,
-        )
-        for cluster, distance in zip(
-            discard_candidates, distances, strict=True
+    for candidate in candidates:
+        if (
+            lowest_edge - candidate.cy - candidate.height / 2
+            > 4 * max(lowest.size, candidate.size)
         ):
-            if distance <= limit:
-                cluster.seat = _seat(
-                    cluster.centroid,
-                    seat_center,
-                    directions,
+            break
+        if candidate in rejected:
+            continue
+        partner = min(
+            (
+                tile
+                for tile in tiles
+                if tile is not candidate
+                and 0.5 <= candidate.size / tile.size <= 2
+            ),
+            key=lambda tile: hypot(
+                tile.cx - candidate.cx,
+                tile.cy - candidate.cy,
+            ),
+            default=None,
+        )
+        if (
+            partner is not None
+            and hypot(partner.cx - candidate.cx, partner.cy - candidate.cy)
+            <= min(2.0, params.hand_merge_gap_k)
+            * max(candidate.size, partner.size)
+        ):
+            selected = _grow_hand_line(candidate, partner, tiles, params)
+            if len(selected) > params.hand_max_tiles:
+                physical_count = (
+                    2 * fsum(tile.width for tile in selected)
+                    / median(tile.height for tile in selected)
                 )
-                cluster.role, cluster.heuristic_score = (
-                    "discard",
-                    1 - distance / limit if limit else 1.0,
+                if (
+                    median(tile.aspect for tile in selected) < 2.8
+                    or physical_count > params.hand_max_tiles
+                ):
+                    selected = selected[: params.hand_max_tiles]
+            if len(selected) >= params.hand_min_tiles:
+                return tuple(selected)
+            rejected.update(selected)
+    # Открытые чи/поны разрывают руку на несколько коротких рядов. Расширяем
+    # нижнюю микрозону до минимальной полной руки вместо выбора центрального
+    # сброса как одного красивого ряда.
+    visible = [
+        tile
+        for tile in candidates
+        if (tile.face_score or 0) >= params.face_threshold
+    ]
+    fallback = visible if len(visible) >= params.hand_min_tiles else candidates
+    fallback = fallback[: params.hand_max_tiles]
+    ordered_x = sorted(fallback, key=lambda tile: tile.cx)
+    if len(ordered_x) >= params.hand_min_tiles:
+        gap, cut = max(
+            (
+                (right.cx - left.cx, index)
+                for index, (left, right) in enumerate(
+                    zip(ordered_x, ordered_x[1:]), start=1
                 )
-            else:
-                cluster.role = "noise"
-    _enforce_table_structure(clusters, directions, center, frame, params)
-    dead_wall = _extract_embedded_dora(clusters, params, frame)
-    hand = next((cluster for cluster in clusters if cluster.role == "hand"), None)
-    return hand, dead_wall
+            ),
+            default=(0.0, 0),
+        )
+        parts = (ordered_x[:cut], ordered_x[cut:])
+        viable = [part for part in parts if len(part) >= params.hand_min_tiles]
+        if viable and gap > 3 * median(tile.width for tile in fallback):
+            fallback = max(
+                viable,
+                key=lambda part: median(
+                    tile.cy + tile.height / 2 for tile in part
+                ),
+            )
+    return (
+        tuple(fallback)
+        if len(fallback) >= params.hand_min_tiles
+        else ()
+    )
+
+
+def _grow_hand_line(
+    seed: TileBox,
+    nearest: TileBox,
+    tiles: tuple[TileBox, ...],
+    params: LayoutParams,
+) -> list[TileBox]:
+    selected = [seed, nearest]
+    remaining = [tile for tile in tiles if tile not in selected]
+    while remaining and len(selected) < 2 * params.hand_max_tiles:
+        line = _describe(tuple(selected))
+        candidate = min(
+            (
+                tile
+                for tile in remaining
+                if 0.5 <= line.scale / tile.size <= 2
+                and _axis_distance((tile.cx, tile.cy), line)
+                <= 0.9 * max(line.scale, tile.size)
+                and _projected_gap(line, _describe((tile,)), line.axis)
+                <= (params.hand_merge_gap_k + 1.5)
+                * max(line.scale, tile.size)
+            ),
+            key=lambda tile: _cluster_gap(line, _describe((tile,))),
+            default=None,
+        )
+        if candidate is None:
+            break
+        selected.append(candidate)
+        remaining.remove(candidate)
+    return selected
+
+
+def _discard_quartet(candidates: list[Cluster]) -> tuple[Cluster, ...]:
+    """Find two parallel pairs whose pair axes are perpendicular."""
+
+    pairings = (((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2)))
+    best: tuple[float, tuple[Cluster, ...]] | None = None
+    for quartet in combinations(candidates, 4):
+        if len({tile for cluster in quartet for tile in cluster.tiles}) != sum(
+            cluster.tile_count for cluster in quartet
+        ):
+            continue
+        counts = [cluster.tile_count for cluster in quartet]
+        if max(counts) - min(counts) > MAX_DISCARD_ROW_TILES:
+            continue
+        center = _center(list(quartet))
+        radii = [
+            hypot(
+                cluster.centroid[0] - center[0],
+                cluster.centroid[1] - center[1],
+            )
+            for cluster in quartet
+        ]
+        if not min(radii) or max(radii) > 2 * min(radii):
+            continue
+        directions = _seat_directions((0.0, 1.0))
+        if len({_seat(cluster.centroid, center, directions) for cluster in quartet}) < 4:
+            continue
+        for first_pair, second_pair in pairings:
+            a, b = (quartet[index] for index in first_pair)
+            c, d = (quartet[index] for index in second_pair)
+            first_axis = _paired_axis(a, b)
+            second_axis = _paired_axis(c, d)
+            first_parallel = abs(_projection(a.axis, b.axis))
+            second_parallel = abs(_projection(c.axis, d.axis))
+            perpendicular = 1 - abs(_projection(first_axis, second_axis))
+            first_opposed = _opposed_pair(a, b, first_axis)
+            second_opposed = _opposed_pair(c, d, second_axis)
+            if min(
+                first_parallel,
+                second_parallel,
+                perpendicular,
+                first_opposed,
+                second_opposed,
+            ) < 0.65:
+                continue
+            score = (
+                first_parallel
+                + second_parallel
+                + perpendicular
+                + first_opposed
+                + second_opposed
+                + sum(min(cluster.tile_count, 18) for cluster in quartet) / 72
+            )
+            if best is None or score > best[0]:
+                best = score, quartet
+    return best[1] if best else ()
+
+
+def _paired_axis(first: Cluster, second: Cluster) -> tuple[float, float]:
+    sign = 1 if _projection(first.axis, second.axis) >= 0 else -1
+    return _normalize(
+        (first.axis[0] + sign * second.axis[0], first.axis[1] + sign * second.axis[1])
+    )
+
+
+def _opposed_pair(
+    first: Cluster,
+    second: Cluster,
+    axis: tuple[float, float],
+) -> float:
+    delta = _normalize(
+        (
+            second.centroid[0] - first.centroid[0],
+            second.centroid[1] - first.centroid[1],
+        )
+    )
+    return 1 - abs(_projection(delta, axis))
+
+
+def _one_wall_per_seat(
+    candidates: list[Cluster],
+    center: tuple[float, float],
+    directions: dict[str, tuple[float, float]],
+    params: LayoutParams,
+) -> tuple[Cluster, ...]:
+    by_seat: dict[str, list[Cluster]] = {}
+    for wall in candidates:
+        by_seat.setdefault(_seat(wall.centroid, center, directions), []).append(wall)
+    return tuple(
+        max(
+            walls,
+            key=lambda wall: (
+                1
+                <= _face_count(wall, params.face_threshold)
+                <= DORA_MAX_TILES,
+                _back_fraction(wall, params.face_threshold),
+                wall.linearity,
+                -hypot(
+                    wall.centroid[0] - center[0],
+                    wall.centroid[1] - center[1],
+                ),
+                wall.tile_count,
+            ),
+        )
+        for walls in by_seat.values()
+    )
+
+
+def _tile_center(
+    tiles: tuple[TileBox, ...], frame: TableFrame | None
+) -> tuple[float, float]:
+    if not tiles:
+        return 0.5, 0.5
+    points = [_point(tile, frame) for tile in tiles]
+    return median(point[0] for point in points), median(point[1] for point in points)
 
 
 def _promote_edge_hands(
@@ -1081,13 +1076,25 @@ def _extract_embedded_dora(
 ) -> Cluster | None:
     """Find class-confirmed face tiles embedded in a line of wall backs."""
 
-    for cluster in clusters:
-        if cluster.role == "dora":
-            cluster.role = "other"
-        elif cluster.role == "dead_wall":
-            cluster.role = "wall"
+    existing = next(
+        (cluster for cluster in clusters if cluster.role == "dead_wall"),
+        None,
+    )
+    if sum(cluster.role == "dora" for cluster in clusters) == 1:
+        return existing
 
-    tiles = tuple(tile for cluster in clusters for tile in cluster.tiles)
+    known_wall_tiles = {
+        tile
+        for cluster in clusters
+        if cluster.role in {"wall", "dead_wall", "dora"}
+        for tile in cluster.tiles
+    }
+    tiles = tuple(
+        tile
+        for cluster in clusters
+        if cluster.role not in {"hand", "discard", "opponent_hand"}
+        for tile in cluster.tiles
+    )
     faces = [
         tile
         for tile in tiles
@@ -1115,7 +1122,7 @@ def _extract_embedded_dora(
             )
             <= 3 * max(scale, _tile_scale(back, frame))
         )
-        if len(support) < params.dead_wall_min_tiles:
+        if len(support) < 2:
             continue
         wall = _describe(support, frame)
         along = [_projection(_point(back, frame), wall.axis) for back in support]
@@ -1124,15 +1131,16 @@ def _extract_embedded_dora(
         if (
             wall.rows <= 2
             and wall.linearity >= 0.7
-            and distance <= 0.9
+            and distance <= 0.55
             and min(along) <= face_along <= max(along)
         ):
             candidates.append(
                 (
                     (
+                        sum(back in known_wall_tiles for back in support),
+                        min(len(support), params.dead_wall_max_tiles),
                         wall.linearity,
                         -distance,
-                        min(len(support), params.dead_wall_max_tiles),
                         face.face_score or 0,
                     ),
                     face,
@@ -1140,18 +1148,36 @@ def _extract_embedded_dora(
                 )
             )
     if not candidates:
-        return None
+        return existing
+
+    for cluster in clusters:
+        if cluster.role == "dora":
+            cluster.role = "other"
+        elif cluster.role == "dead_wall":
+            cluster.role = "wall"
 
     _, _, wall = max(candidates, key=lambda candidate: candidate[0])
     support = {
         back
         for back in backs
-        if _axis_distance(_point(back, frame), wall) <= 0.9 * wall.scale
+        if _axis_distance(_point(back, frame), wall) <= 0.55 * wall.scale
     }
+    along = [_projection(_point(back, frame), wall.axis) for back in support]
+    anchor = max(candidates, key=lambda candidate: candidate[0])[1]
     dora_tiles = tuple(
-        candidate[1]
-        for candidate in sorted(candidates, reverse=True, key=lambda item: item[0])
-        if support.intersection(candidate[2].tiles)
+        face
+        for _, face, candidate_wall in sorted(
+            candidates, reverse=True, key=lambda item: item[0]
+        )
+        if len(support.intersection(candidate_wall.tiles)) >= 2
+        and abs(_projection(candidate_wall.axis, wall.axis)) >= 0.8
+        and _axis_distance(_point(face, frame), wall) <= 0.55 * wall.scale
+        and min(along) <= _projection(_point(face, frame), wall.axis) <= max(along)
+        and hypot(
+            _point(face, frame)[0] - _point(anchor, frame)[0],
+            _point(face, frame)[1] - _point(anchor, frame)[1],
+        )
+        <= (DORA_MAX_TILES + 1) * wall.scale
     )[:DORA_MAX_TILES]
     wall_tiles = tuple(
         sorted(

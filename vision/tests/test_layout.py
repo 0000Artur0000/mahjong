@@ -113,12 +113,13 @@ class LayoutTest(unittest.TestCase):
         ):
             self.assertAlmostEqual(actual, expected)
 
-    def test_clusters_hand_and_keeps_ambiguous_group_unassigned(self) -> None:
+    def test_grows_hand_from_lowest_tile_and_marks_the_rest_as_noise(self) -> None:
         result = cluster_layout(row(0.85, 0.10, 13) + row(0.25, 0.55, 5))
 
         self.assertIsNotNone(result.hand)
         self.assertEqual(result.hand.tile_count, 13)
-        self.assertEqual([cluster.tile_count for cluster in result.others], [5])
+        self.assertFalse(result.others)
+        self.assertEqual([cluster.tile_count for cluster in result.noise], [5])
         with self.assertRaises(ValueError):
             TileBox(0.99, 0.5, 0.1, 0.1)
         with self.assertRaises(ValueError):
@@ -202,8 +203,8 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(result.hand.tile_count, 14)
         self.assertEqual(result.dead_wall.tile_count, 9)
         self.assertEqual(result.dora[0].tile_count, 1)
-        self.assertEqual([cluster.tile_count for cluster in result.discards], [12])
-        self.assertEqual(result.discards[0].tiles, tuple(discards))
+        self.assertFalse(result.discards)
+        self.assertIn(12, [cluster.tile_count for cluster in result.noise])
 
     def test_dora_must_be_a_face_tile_embedded_in_the_wall(self) -> None:
         indicator = TileBox(0.32, 0.30, 0.035, 0.05, 27, 0.9)
@@ -220,6 +221,27 @@ class LayoutTest(unittest.TestCase):
 
         self.assertEqual(result.dora[0].tiles, (indicator,))
         self.assertNotIn(unrelated_face, result.dead_wall.tiles)
+
+    def test_dora_survives_two_detected_dead_wall_stacks(self) -> None:
+        indicator = TileBox(0.32, 0.30, 0.035, 0.05, 27, 0.9)
+        backs = [
+            TileBox(x, 0.30, 0.035, 0.05, face_score=0.0)
+            for x in (0.28, 0.36)
+        ]
+
+        result = cluster_layout([*backs, indicator])
+
+        self.assertEqual(result.dora[0].tiles, (indicator,))
+        self.assertEqual(result.dead_wall.tile_count, 2)
+
+    def test_dora_is_not_guessed_from_one_wall_stack(self) -> None:
+        indicator = TileBox(0.32, 0.30, 0.035, 0.05, 27, 0.9)
+        back = TileBox(0.28, 0.30, 0.035, 0.05, face_score=0.0)
+
+        result = cluster_layout([back, indicator])
+
+        self.assertIsNone(result.dead_wall)
+        self.assertFalse(result.dora)
 
     def test_names_open_melds_from_gap_rotation_and_tile_classes(self) -> None:
         def tiles(
@@ -296,7 +318,7 @@ class LayoutTest(unittest.TestCase):
         self.assertIsNone(result.dead_wall)
         self.assertFalse(result.walls)
 
-    def test_grows_micro_zones_in_table_coordinates(self) -> None:
+    def test_does_not_invent_discards_without_two_parallel_pairs(self) -> None:
         own = [
             TileBox(
                 0.16 + index * 0.045,
@@ -359,11 +381,11 @@ class LayoutTest(unittest.TestCase):
         )
 
         self.assertEqual(result.hand.tile_count, 14)
-        self.assertEqual(result.opponent_hands[0].tile_count, 12)
-        self.assertEqual(result.opponent_hands[0].seat, "opposite")
-        self.assertEqual(sum(group.tile_count for group in result.discards), 12)
+        self.assertFalse(result.opponent_hands)
+        self.assertFalse(result.discards)
+        self.assertGreaterEqual(sum(group.tile_count for group in result.noise), 12)
 
-    def test_opponent_hands_outrank_walls_without_image_edge_hardcode(self) -> None:
+    def test_closed_opponent_hands_are_noise(self) -> None:
         own = [
             TileBox(0.15 + index * 0.045, 0.85, 0.035, 0.055, face_score=1)
             for index in range(14)
@@ -418,13 +440,10 @@ class LayoutTest(unittest.TestCase):
                 table_corners=((0, 0), (1, 0), (1, 1), (0, 1)),
             ),
         )
-        self.assertEqual(
-            sorted(group.tile_count for group in result.opponent_hands),
-            [7, 9, 12],
-        )
+        self.assertFalse(result.opponent_hands)
         self.assertIn(15, [group.tile_count for group in result.walls])
 
-    def test_separates_open_melds_from_a_nine_tile_discard_row(self) -> None:
+    def test_open_opponent_tiles_are_noise_without_four_discards(self) -> None:
         own = [
             TileBox(0.20 + index * 0.035, 0.88, 0.025, 0.04, face_score=1)
             for index in range(14)
@@ -456,18 +475,101 @@ class LayoutTest(unittest.TestCase):
             ),
         )
 
-        self.assertIn(11, [group.tile_count for group in result.opponent_hands])
-        self.assertIn(9, [group.tile_count for group in result.discards])
+        self.assertFalse(result.opponent_hands)
+        self.assertFalse(result.discards)
+        self.assertGreaterEqual(sum(group.tile_count for group in result.noise), 20)
 
-    def test_hand_selection_is_not_tied_to_bottom_of_image(self) -> None:
+    def test_hand_selection_skips_a_shorter_bottom_group(self) -> None:
         result = cluster_layout(
-            row(0.10, 0.10, 13) + row(0.55, 0.55, 5),
+            row(0.70, 0.10, 13) + row(0.88, 0.55, 5),
             LayoutParams(player_direction=(0, -1)),
         )
 
         self.assertEqual(result.hand.tile_count, 13)
+        self.assertIn(5, [group.tile_count for group in result.noise])
 
-    def test_missing_right_discard_does_not_shift_self_to_the_right(self) -> None:
+    def test_hand_search_keeps_expanding_until_it_reaches_thirteen(self) -> None:
+        result = cluster_layout(row(0.20, 0.10, 13) + row(0.88, 0.55, 5))
+
+        self.assertIsNotNone(result.hand)
+        self.assertEqual(result.hand.tile_count, 18)
+
+    def test_finds_four_discards_as_two_parallel_pairs(self) -> None:
+        hand = [
+            TileBox(0.18 + index * 0.045, 0.90, 0.035, 0.055, face_score=1)
+            for index in range(14)
+        ]
+
+        def horizontal(y: float) -> list[TileBox]:
+            return [
+                TileBox(
+                    tile.cx,
+                    tile.cy,
+                    tile.width,
+                    tile.height,
+                    face_score=1,
+                )
+                for tile in grid(
+                    0.43,
+                    y,
+                    4,
+                    2,
+                    width=0.025,
+                    height=0.04,
+                    step_x=0.03,
+                    step_y=0.045,
+                )
+            ]
+
+        def vertical(x: float) -> list[TileBox]:
+            return [
+                TileBox(
+                    tile.cx,
+                    tile.cy,
+                    tile.width,
+                    tile.height,
+                    face_score=1,
+                )
+                for tile in grid(
+                    x,
+                    0.43,
+                    2,
+                    4,
+                    width=0.04,
+                    height=0.025,
+                    step_x=0.045,
+                    step_y=0.03,
+                )
+            ]
+
+        paper = [
+            TileBox(0.04 + index * 0.03, 0.72, 0.02, 0.03, face_score=1)
+            for index in range(2)
+        ]
+        opponent_hand = [
+            TileBox(0.15 + index * 0.045, 0.08, 0.035, 0.055, face_score=1)
+            for index in range(14)
+        ]
+        result = cluster_layout(
+            hand
+            + horizontal(0.65)
+            + horizontal(0.28)
+            + vertical(0.24)
+            + vertical(0.70)
+            + paper
+            + opponent_hand,
+            LayoutParams(table_corners=((0, 0), (1, 0), (1, 1), (0, 1))),
+        )
+
+        self.assertEqual(len(result.discards), 4)
+        self.assertEqual(
+            {cluster.seat for cluster in result.discards},
+            {"self", "left", "opposite", "right"},
+        )
+        self.assertEqual(sorted(cluster.tile_count for cluster in result.discards), [8] * 4)
+        self.assertEqual(sum(cluster.tile_count for cluster in result.noise), 16)
+
+    def test_three_discard_clusters_are_not_presented_as_a_complete_table(self) -> None:
         hand = [
             TileBox(0.15 + index * 0.045, 0.9, 0.035, 0.055, face_score=1)
             for index in range(14)
@@ -505,18 +607,17 @@ class LayoutTest(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(
-            {cluster.seat for cluster in result.discards},
-            {"self", "opposite", "left"},
-        )
+        self.assertFalse(result.discards)
+        self.assertEqual(sum(group.tile_count for group in result.noise), 18)
 
-    def test_overdetected_nearest_hand_does_not_select_an_opponent(self) -> None:
+    def test_caps_an_overdetected_nearest_hand(self) -> None:
         near = row(0.88, 0.02, 20)
         opponent = row(0.20, 0.15, 13)
 
         result = cluster_layout(near + opponent)
 
-        self.assertIsNone(result.hand)
+        self.assertEqual(result.hand.tile_count, 18)
+        self.assertEqual(sum(group.tile_count for group in result.noise), 15)
 
 
 if __name__ == "__main__":
