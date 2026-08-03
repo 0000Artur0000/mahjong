@@ -1,4 +1,27 @@
-# Riichi model smoke training
+# Обучение ML-моделей
+
+Актуальный статус пайплайна и данные собраны в [README.md](README.md). Основная
+локализация сейчас выполняется CountGD++ без дообучения; этот документ хранит
+воспроизводимые эксперименты с YOLO, synthetic data и CVAT.
+
+## Что обучать следующим
+
+Новый общий training run пока не нужен. Сначала нужен независимый review set с
+разметкой каждого тайла и его роли на худших дальних/наклонённых кадрах. После
+этого обучение разделяется на две независимые задачи:
+
+1. Single-class `tile` detector дообучается только на подтверждённых пропусках
+   и hard negatives. Train/validation делятся по сессиям съёмки, а не случайно
+   по соседним фотографиям.
+2. 37-class nominal classifier обучается на перспективно вырезанных лицах уже
+   найденных тайлов. Его accuracy не смешивается с detection recall и role
+   grouping.
+
+`SAM2` не является заменой дообучения proposal detector: он уточняет форму
+существующего box, но не создаёт отсутствующие proposals. Пять клубных фото уже
+входили в обучение и не могут считаться независимым acceptance set.
+
+## Synthetic smoke для 37 классов
 
 Synthetic data checks the 37-class pipeline; it is not a validation set and
 does not prove accuracy on physical tiles.
@@ -73,7 +96,7 @@ are rejected; some paper/dice false positives and missed wall segments remain.
 The artifact and private data stay outside Git. It is not a product release,
 and the five training photos are no longer an unbiased acceptance set.
 
-## Latest local smoke
+## Исторический synthetic smoke
 
 On 2026-07-29 the default generator produced 518 scenes and 8,034 boxes.
 YOLO26n, 10 epochs at 320 px, reached synthetic validation precision `0.050`,

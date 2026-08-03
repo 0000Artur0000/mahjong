@@ -1,5 +1,33 @@
 # ML sources
 
+Краткий статус всей ML-части находится в [README.md](README.md). Здесь
+фиксируются upstream, commit, лицензия и решение об использовании.
+
+## Current tile proposals: CountGD++
+
+[`niki-amini-naieni/CountGDPlusPlus`](https://github.com/niki-amini-naieni/CountGDPlusPlus)
+проверен на commit `345447b8848b5cc3554ae3712b61c57de89162d5` и содержит MIT
+license. Репозиторий и checkpoints хранятся локально вне Dorahub в
+`experiments/countgdpp`.
+
+CountGD++ принят как текущий reference proposal detector: prompt и exemplar
+дают лучший визуальный охват полного стола среди проверенных zero/few-shot
+вариантов. В Dorahub не копируется модель; сохраняется её JSON-выход, после
+чего собственный `split_tile_rows.py` разделяет слипшиеся ряды, а layout parser
+назначает роли. Количество proposals не считается precision/recall без
+независимой instance-разметки.
+
+## Contours: Segment Anything 2
+
+[`facebookresearch/sam2`](https://github.com/facebookresearch/sam2) проверен на
+commit `2b90b9f5ceec907a1c18123530e92e794ad901a4`, Apache-2.0. Модель и веса
+остаются вне Git.
+
+SAM2 используется только после detector box для перспективного контура тайла.
+Контур проверяется относительно prompt; при плохой маске используется
+CountGD++ polygon. SAM2 не создаёт пропущенные detector proposals и не заменяет
+дообучение локализатора.
+
 ## Riichi recognition reference
 
 [`2409324124/riichi-mahjong-recognition`](https://github.com/2409324124/riichi-mahjong-recognition)
@@ -79,3 +107,17 @@ capture protocol. Перед grouping сцена нормализуется по
 [`Ultralytics/SAHI` guide](https://github.com/ultralytics/ultralytics/blob/main/docs/en/guides/sahi-tiled-inference.md)
 полезен для sliced detection и box merging, но не определяет hand/dead
 wall/discard; заменять им текущие 12 crops стоит только после benchmark.
+
+## Отклонённые и резервные эксперименты
+
+| Источник | Решение на наших фото |
+|---|---|
+| [`MLFreelib/cvflow`](https://github.com/MLFreelib/cvflow) | отдельный локальный эксперимент; визуально хуже CountGD++ |
+| GroundingDINO | недостаточный охват/стабильность по полному столу |
+| OWLv2 | недостаточный охват мелких и перспективных тайлов |
+| RF-DETR Nano | на пяти клубных фото при IoU 0.30: P=0.366, R=0.151; отклонён |
+| YOLO + crops/SAHI | резервный локальный detector; перенос хуже CountGD++ |
+| top-down homography | только второй проход: помогает номиналам, но может терять proposals |
+
+Эти варианты не удалены из истории экспериментов, но не должны незаметно
+становиться production path без сравнения на одном проверенном split.
